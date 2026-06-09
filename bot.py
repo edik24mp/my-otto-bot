@@ -940,8 +940,9 @@ async def handle_api_data(request):
             headers={"Access-Control-Allow-Origin": "*"})
 
 async def start_api_server():
-    """Запускает aiohttp сервер для WebApp API."""
-    app_web = web.Application()
+    """Запускает aiohttp сервер для WebApp API с поддержкой CORS."""
+    from aiohttp_middlewares import cors_middleware  # добавьте этот импорт, если его нет вверху
+    app_web = web.Application(middlewares=[cors_middleware(allow_all=True)])
     app_web.router.add_post("/api/data", handle_api_data)
     app_web.router.add_options("/api/data", handle_api_data)
     runner = web.AppRunner(app_web)
