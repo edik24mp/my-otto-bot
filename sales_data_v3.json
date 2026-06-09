@@ -1,0 +1,24 @@
+{
+  "years": {
+    "2026": {
+      "year_plan_payments": 0,
+      "year_plan_profitability_pct": 0,
+      "months": {
+        "06": {
+          "plan_payments": 17000000.0,
+          "plan_profitability_pct": 20.0,
+          "cumulative_entries": [
+            {
+              "date": "2026-06-09",
+              "cumulative_payments": 5705942.0,
+              "profitability_pct": 22.27
+            }
+          ],
+          "result_payments": null,
+          "result_profitability_pct": null
+        }
+      }
+    }
+  },
+  "extended_reports": {}
+}

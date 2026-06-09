@@ -1,0 +1,15 @@
+{
+  "users": {
+    "307720204": {
+      "name": "Эдик",
+      "position": "director",
+      "nickname": "",
+      "is_admin": true,
+      "is_banned": false,
+      "reg": "2026-06-09 22:08"
+    }
+  },
+  "admins": [
+    307720204
+  ]
+}
