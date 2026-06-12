@@ -20,7 +20,7 @@ from io import BytesIO
 from supabase import create_client, Client
 
 # ====== НАСТРОЙКИ ======
-BOT_TOKEN = "8996749929:AAFzwkdP8IUXClv8yMEK-0sH2-QoJXLLFPM"
+BOT_TOKEN = "8996749929:AAF5Li8zgytNCGoy3QDmDRol0nE6-83KleE"
 ADMIN_USER_ID = 307720204
 SECRET_CODE = "Ваня мудила"
 PREMIUM_START_YEAR = 2025
