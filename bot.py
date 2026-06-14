@@ -674,9 +674,13 @@ async def dash_m(update, ctx):
     if md["plan_payments"] == 0:
         await msg.reply_text("⚠️ План не установлен.")
         return
-    # временная заглушка, чтобы бот не падал
-await msg.reply_text("📊 *Дашборд временно недоступен, ведутся технические работы*", parse_mode="Markdown")
-# закомментируйте или удалите строки с графиком
+    # Временная заглушка
+    await msg.reply_text("📊 *Дашборд временно недоступен, ведутся технические работы*", parse_mode="Markdown")
+    # Если позже добавите реализацию gen_month_dash, раскомментируйте:
+    # t = mtotals(md, now.year, now.month)
+    # img = gen_month_dash(md, t)
+    # await msg.reply_photo(photo=img, caption=f"📊 {MN[now.month]} {now.year}")
+
 async def dash_y(update, ctx):
     if not await _chk(update):
         return
@@ -688,9 +692,12 @@ async def dash_y(update, ctx):
     if yd["year_plan_payments"] == 0:
         await msg.reply_text("⚠️ Годовой план не установлен. /set_year_plan")
         return
-   # временная заглушка, чтобы бот не падал
-await msg.reply_text("📊 *Дашборд временно недоступен, ведутся технические работы*", parse_mode="Markdown")
-# закомментируйте или удалите строки с графиком
+    # Временная заглушка
+    await msg.reply_text("📊 *Дашборд года временно недоступен*", parse_mode="Markdown")
+    # yt = ytotals(now.year)
+    # img = gen_year_dash(yd, yt)
+    # await msg.reply_photo(photo=img, caption=f"📊 Год {now.year}")
+
 async def multi_y(update, ctx):
     if not await _chk(update):
         return
@@ -701,21 +708,23 @@ async def multi_y(update, ctx):
     if not years:
         await msg.reply_text("⚠️ Нет данных.")
         return
-    # Собираем данные для графика (как в оригинале, но через supabase)
-    data = {"years": {}}
-    for y in years:
-        yp = get_year_plan(y)
-        data["years"][str(y)] = {
-            "year_plan_payments": yp["year_plan_payments"],
-            "year_plan_profitability_pct": yp["year_plan_profitability_pct"],
-            "months": {}
-        }
-        for m in range(1, 13):
-            md = get_month_data(y, m)
-            if md["plan_payments"] > 0 or md["cumulative_entries"]:
-                data["years"][str(y)]["months"][f"{m:02d}"] = md
-    img = gen_multi_year(data, years)
-    await msg.reply_photo(photo=img, caption="📉 Динамика по годам")
+    # Временная заглушка
+    await msg.reply_text("📉 *Динамика по годам временно недоступна*", parse_mode="Markdown")
+    # Следующий код требует реализации gen_multi_year, поэтому пока отключён
+    # data = {"years": {}}
+    # for y in years:
+    #     yp = get_year_plan(y)
+    #     data["years"][str(y)] = {
+    #         "year_plan_payments": yp["year_plan_payments"],
+    #         "year_plan_profitability_pct": yp["year_plan_profitability_pct"],
+    #         "months": {}
+    #     }
+    #     for m in range(1, 13):
+    #         md = get_month_data(y, m)
+    #         if md["plan_payments"] > 0 or md["cumulative_entries"]:
+    #             data["years"][str(y)]["months"][f"{m:02d}"] = md
+    # img = gen_multi_year(data, years)
+    # await msg.reply_photo(photo=img, caption="📉 Динамика по годам")
 
 async def summary_m(update, ctx):
     if not await _chk(update):
