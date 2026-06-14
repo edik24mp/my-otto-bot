@@ -422,12 +422,18 @@ async def plan_pay(update, ctx):
         return SET_PLAN_PAY
 
 async def plan_prof(update, ctx):
+    import re
     try:
-        text = update.message.text.strip()
-        # Убираем всё, кроме цифр, точки и запятой
-        import re
-        cleaned = re.sub(r'[^0-9.,-]', '', text.replace(',', '.'))
-        v = float(cleaned)
+        raw = update.message.text
+        # 1. Убираем все невидимые управляющие символы
+        cleaned = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', raw)
+        # 2. Находим первое число в строке (с точкой или запятой)
+        match = re.search(r'(\d+[.,]?\d*)', cleaned)
+        if not match:
+            raise ValueError("No number found")
+        num_str = match.group(1).replace(',', '.')
+        v = float(num_str)
+        
         md = get_month_data(ctx.user_data["py"], ctx.user_data["pm"])
         md["plan_payments"] = ctx.user_data["pp"]
         md["plan_profitability_pct"] = v
@@ -439,7 +445,8 @@ async def plan_prof(update, ctx):
             parse_mode="Markdown"
         )
         return ConversationHandler.END
-    except Exception:
+    except Exception as e:
+        logging.error(f"plan_prof error: {e}, raw text: {repr(update.message.text)}")
         await update.message.reply_text("❌ Введите рентабельность (например, 20)")
         return SET_PLAN_PROF
 
