@@ -1370,6 +1370,7 @@ async def post_init(app):
         BotCommand("cancel", "Отменить текущее действие"),
     ]
     await app.bot.set_my_commands(commands)
+    await app.bot.set_chat_menu_button(menu_button=None)   # убирает кастомную кнопку
     
 # ====== MAIN ======
 def main():
