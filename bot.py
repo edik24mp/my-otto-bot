@@ -27,7 +27,7 @@ PREMIUM_START_YEAR = 2025
 PREMIUM_START_MONTH = 9
 
 # Supabase credentials (замените на свои)
-SUPABASE_URL = "https://ваш-проект.supabase.co"
+SUPABASE_URL = "https://fqoigjvvtvayeobxzaui.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ваш-service-role-key"
 
 # URL веб-приложения
