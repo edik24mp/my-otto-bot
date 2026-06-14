@@ -423,11 +423,22 @@ async def plan_pay(update, ctx):
 
 async def plan_prof(update, ctx):
     try:
-        raw = update.message.text.strip()
-        # Убираем знак процента, пробелы, заменяем запятую
-        num_str = raw.replace('%', '').replace(',', '.').replace(' ', '')
-        v = float(num_str)
-        # ... остальное
+        text = update.message.text.strip()
+        # Убираем всё, кроме цифр, точки и запятой
+        import re
+        cleaned = re.sub(r'[^0-9.,-]', '', text.replace(',', '.'))
+        v = float(cleaned)
+        md = get_month_data(ctx.user_data["py"], ctx.user_data["pm"])
+        md["plan_payments"] = ctx.user_data["pp"]
+        md["plan_profitability_pct"] = v
+        set_month_data(ctx.user_data["py"], ctx.user_data["pm"], md)
+        td = days_in(ctx.user_data["py"], ctx.user_data["pm"])
+        dp = ctx.user_data["pp"] / td if td else 0
+        await update.message.reply_text(
+            f"✅ *План!*\n💰 {ctx.user_data['pp']:,.0f} ₽\n📈 {v:.1f}%\n📅 Дней: {td}\n📊 Норма: {dp:,.0f} ₽/день",
+            parse_mode="Markdown"
+        )
+        return ConversationHandler.END
     except Exception:
         await update.message.reply_text("❌ Введите рентабельность (например, 20)")
         return SET_PLAN_PROF
