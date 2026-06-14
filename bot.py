@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v3.4 (Supabase)
+TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v3.5 (Supabase + графики)
 pip install "python-telegram-bot[job-queue]>=21.0" matplotlib numpy aiohttp supabase
 """
 import json, os, logging, asyncio, re
@@ -100,7 +100,6 @@ def get_year_plan(year: int) -> dict:
     return {"year_plan_payments": 0, "year_plan_profitability_pct": 0}
 
 def set_year_plan(year: int, payments: float, profitability: float):
-    # Преобразуем сумму в целое число
     supabase.table("year_plans").upsert({
         "year": year,
         "plan_payments": int(payments),
@@ -127,7 +126,6 @@ def get_month_data(year: int, month: int) -> dict:
     }
 
 def set_month_data(year: int, month: int, data: dict):
-    # Преобразуем суммы в целые числа
     plan_payments = data.get("plan_payments", 0)
     if plan_payments is not None:
         plan_payments = int(plan_payments)
@@ -253,15 +251,172 @@ def ytotals(year):
         "pctp": fp_ / ypp * 100 if ypp else 0, "pctpr": ap / ypr * 100 if ypr else 0, "mr": mr
     }
 
-# ====== ГРАФИКИ (пока заглушки) ======
+# ====== ГРАФИКИ (светлая тема, восстановлены из v3.3) ======
 def gen_month_dash(md, t):
-    pass
+    fig = plt.figure(figsize=(14,20), facecolor="#FFFFFF")
+    BG, CB, T, TS = "#FFFFFF", "#F8F9FA", "#212529", "#6C757D"
+    GR, RD, OR, GD, CY = "#22c55e", "#ef4444", "#FFA500", "#FFD700", "#06b6d4"
+
+    fig.text(0.5,0.97, f'{t["mn"]} {t["year"]}', ha="center", fontsize=28, fontweight="bold", color=T)
+    stxt, scol = ("ПЕРЕВЫПОЛНЕНИЕ", GR) if t["ahead"] else (("ОТСТАВАНИЕ", RD) if t["behind"] else ("В НОРМЕ", CY))
+    fig.text(0.5,0.945, stxt, ha="center", fontsize=18, fontweight="bold", color=scol)
+
+    ax1 = fig.add_axes([0.06,0.86,0.88,0.04], facecolor=CB)
+    ax1.set_xlim(0,100); ax1.set_ylim(0,1); ax1.set_xticks([]); ax1.set_yticks([])
+    for s in ax1.spines.values(): s.set_visible(False)
+    pct = min(t["pctp"],100)
+    bc = GR if t["ahead"] else (RD if t["behind"] else OR)
+    ax1.barh(0.5, pct, 0.7, color=bc, alpha=0.9, zorder=2)
+    ax1.barh(0.5, 100, 0.7, color="#E5E7EB", alpha=0.8, zorder=1)
+    icon = "🚀" if t["ahead"] else ("❗" if t["behind"] else "💰")
+    ax1.text(0,1.8, f'{icon} ОПЛАТЫ', fontsize=18, fontweight="bold", color=T, transform=ax1.transAxes)
+    ax1.text(1,1.8, f'{t["fp"]:,.0f} / {t["pp"]:,.0f} ₽  ({t["pctp"]:.1f}%)', fontsize=16, color=bc, ha="right", fontweight="bold", transform=ax1.transAxes)
+
+    ax2 = fig.add_axes([0.06,0.78,0.88,0.04], facecolor=CB)
+    ax2.set_xlim(0,100); ax2.set_ylim(0,1); ax2.set_xticks([]); ax2.set_yticks([])
+    for s in ax2.spines.values(): s.set_visible(False)
+    pp2 = min(t["pctpr"],100)
+    pc2 = GR if t["lagpr"]<=0 else RD
+    ax2.barh(0.5, pp2, 0.7, color=pc2, alpha=0.9, zorder=2)
+    ax2.barh(0.5, 100, 0.7, color="#E5E7EB", alpha=0.8, zorder=1)
+    ic2 = "🚀" if t["lagpr"]<=0 else "❗"
+    ax2.text(0,1.8, f'{ic2} РЕНТАБЕЛЬНОСТЬ', fontsize=18, fontweight="bold", color=T, transform=ax2.transAxes)
+    ax2.text(1,1.8, f'{t["fpr"]:.1f}% / {t["ppr"]:.1f}% ({t["pctpr"]:.1f}%)', fontsize=16, color=pc2, ha="right", fontweight="bold", transform=ax2.transAxes)
+
+    y0 = 0.72
+    lagc = RD if t["behind"] else GR
+    lagpc = RD if t["lagpr"]>0 else GR
+    mets = [
+        (f'{"❗" if t["behind"] else "🚀"} Отставание:', f'{abs(t["lag"]):,.0f} ₽', lagc),
+        (f'{"❗" if t["lagpr"]>0 else "🚀"} Откл. рентаб.:', f'{t["lagpr"]:+.1f} п.п.', lagpc),
+        ("⚡ Нужно в день:", f'{t["dn"]:,.0f} ₽', OR),
+        ("📅 День:", f'{t["elapsed"]} из {t["td"]} (ост. {t["remaining"]})', CY),
+        ("📊 Норма/день:", f'{t["avgd"]:,.0f} ₽', TS),
+    ]
+    for lb, vl, cl in mets:
+        fig.text(0.08, y0, lb, fontsize=16, color=TS)
+        fig.text(0.92, y0, vl, fontsize=16, color=cl, ha="right", fontweight="bold")
+        y0 -= 0.03
+
+    df = t.get("df", {})
+    if df:
+        days = sorted(df.keys())
+        cum = []
+        r = 0
+        for d in days:
+            r += df[d]["payments"]
+            cum.append(r)
+        ax3 = fig.add_axes([0.08,0.32,0.86,0.24], facecolor=CB)
+        pdays = list(range(1, t["td"]+1))
+        pline = [t["pp"] * d / t["td"] for d in pdays]
+        lc = GR if t["ahead"] else (RD if t["behind"] else OR)
+        ax3.plot(pdays, pline, "--", color=CY, lw=2, alpha=0.7, label="План")
+        ax3.plot(days, cum, "-o", color=lc, lw=2.5, ms=5, label="Факт")
+        ax3.fill_between(days, cum, alpha=0.15, color=lc)
+        ax3.legend(loc="upper left", fontsize=12, facecolor="white", edgecolor="#E5E7EB", labelcolor=T)
+        ax3.set_title("Накопительная динамика", fontsize=16, fontweight="bold", color=T, pad=12)
+        ax3.tick_params(colors=TS, labelsize=12)
+        ax3.grid(True, alpha=0.2, color="#E5E7EB")
+        for s in ax3.spines.values(): s.set_color("#E5E7EB")
+
+        ax4 = fig.add_axes([0.08,0.05,0.86,0.20], facecolor=CB)
+        pays = [df[d]["payments"] for d in days]
+        bcols = [GR if p >= t["avgd"] else RD for p in pays]
+        ax4.bar(days, pays, color=bcols, alpha=0.8)
+        ax4.axhline(t["avgd"], color=GD, lw=2, ls="--")
+        ax4.set_title("Ежедневные оплаты", fontsize=16, fontweight="bold", color=T, pad=12)
+        ax4.tick_params(colors=TS, labelsize=12)
+        ax4.grid(True, alpha=0.2, color="#E5E7EB", axis="y")
+        for s in ax4.spines.values(): s.set_color("#E5E7EB")
+
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor=BG)
+    buf.seek(0)
+    plt.close(fig)
+    return buf
 
 def gen_year_dash(yd, yt):
-    pass
+    fig = plt.figure(figsize=(14,14), facecolor="#FFFFFF")
+    BG, CB, T, TS = "#FFFFFF", "#F8F9FA", "#212529", "#6C757D"
+    GR, RD, OR, GD = "#22c55e", "#ef4444", "#FFA500", "#FFD700"
+    fig.text(0.5,0.97, f'Год {yt["y"]}', ha="center", fontsize=28, fontweight="bold", color=T)
+    fig.text(0.5,0.94, f'{yt["fp"]:,.0f} / {yt["ypp"]:,.0f} ₽ ({yt["pctp"]:.1f}%)', ha="center", fontsize=16, color=OR)
+    mr = yt.get("mr", [])
+    if mr:
+        ax = fig.add_axes([0.08,0.45,0.86,0.42], facecolor=CB)
+        ms = [r["m"] for r in mr]
+        ps = [r["plan"] for r in mr]
+        fs = [r["fact"] for r in mr]
+        x = np.arange(len(ms))
+        w = 0.35
+        ax.bar(x-w/2, ps, w, label="План", color="#94A3B8", alpha=0.7)
+        ax.bar(x+w/2, fs, w, label="Факт", color=OR, alpha=0.9)
+        ax.set_xticks(x)
+        ax.set_xticklabels([MN[m][:3] for m in ms], fontsize=11)
+        ax.legend(fontsize=12, facecolor="white", edgecolor="#E5E7EB", labelcolor=T)
+        ax.set_title("Помесячное выполнение", fontsize=16, fontweight="bold", color=T, pad=12)
+        ax.tick_params(colors=TS, labelsize=11)
+        ax.grid(True, alpha=0.2, color="#E5E7EB", axis="y")
+        for s in ax.spines.values(): s.set_color("#E5E7EB")
+
+        ax2 = fig.add_axes([0.08,0.06,0.86,0.30], facecolor=CB)
+        profs = [r["prof"] for r in mr]
+        cols = [GR if p >= yt["ypr"] else RD for p in profs]
+        ax2.bar(range(len(ms)), profs, color=cols, alpha=0.8)
+        ax2.axhline(yt["ypr"], color=GD, lw=2, ls="--", label=f'План {yt["ypr"]:.0f}%')
+        ax2.set_xticks(range(len(ms)))
+        ax2.set_xticklabels([MN[m][:3] for m in ms], fontsize=11)
+        ax2.legend(fontsize=11, facecolor="white", edgecolor="#E5E7EB", labelcolor=T)
+        ax2.set_title("Рентабельность по месяцам (%)", fontsize=16, fontweight="bold", color=T, pad=12)
+        ax2.tick_params(colors=TS, labelsize=11)
+        ax2.grid(True, alpha=0.2, color="#E5E7EB", axis="y")
+        for s in ax2.spines.values(): s.set_color("#E5E7EB")
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor=BG)
+    buf.seek(0)
+    plt.close(fig)
+    return buf
 
 def gen_multi_year(data, years):
-    pass
+    fig = plt.figure(figsize=(16,10), facecolor="#FFFFFF")
+    BG, CB, T, TS, OR, CY = "#FFFFFF", "#F8F9FA", "#212529", "#6C757D", "#FFA500", "#06b6d4"
+    res = []
+    for y in sorted(years):
+        s = str(y)
+        if s in data.get("years", {}):
+            yt = ytotals(y)
+            res.append({"y": y, "plan": yt["ypp"], "fact": yt["fp"], "prof": yt["ap"]})
+    if not res:
+        fig.text(0.5,0.5, "Нет данных", ha="center", fontsize=18, color=TS)
+    else:
+        fig.text(0.5,0.95, f'Динамика {min(years)}-{max(years)}', ha="center", fontsize=24, fontweight="bold", color=T)
+        ax = fig.add_axes([0.08,0.15,0.78,0.72], facecolor=CB)
+        ys = [r["y"] for r in res]
+        ps = [r["plan"]/1e6 for r in res]
+        fs = [r["fact"]/1e6 for r in res]
+        x = np.arange(len(ys))
+        w = 0.35
+        ax.bar(x-w/2, ps, w, label="План (млн)", color="#94A3B8", alpha=0.7)
+        ax.bar(x+w/2, fs, w, label="Факт (млн)", color=OR, alpha=0.9)
+        ax.set_xticks(x)
+        ax.set_xticklabels(ys, fontsize=14)
+        ax.set_ylabel("Млн ₽", color=T, fontsize=13)
+        ax.tick_params(colors=TS, labelsize=12)
+        ax.legend(fontsize=12, facecolor="white", edgecolor="#E5E7EB", labelcolor=T)
+        ax.grid(True, alpha=0.2, color="#E5E7EB", axis="y")
+        for s in ax.spines.values(): s.set_color("#E5E7EB")
+        ax2 = ax.twinx()
+        profs = [r["prof"] for r in res]
+        ax2.plot(x, profs, "-o", color=CY, lw=2, ms=8, label="Рентаб. %")
+        ax2.set_ylabel("Рентаб. %", color=CY, fontsize=13)
+        ax2.tick_params(colors=CY, labelsize=12)
+        ax2.legend(loc="upper right", fontsize=12, facecolor="white", edgecolor="#E5E7EB", labelcolor=T)
+        for s in ax2.spines.values(): s.set_color("#E5E7EB")
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor=BG)
+    buf.seek(0)
+    plt.close(fig)
+    return buf
 
 # ====== ACCESS ======
 async def _chk(update):
@@ -421,7 +576,6 @@ def _extract_number(text: str) -> float:
 async def plan_pay(update, ctx):
     try:
         v = _extract_number(update.message.text)
-        # Сохраняем как целое число
         ctx.user_data["pp"] = int(v)
         await update.message.reply_text(f"✅ {int(v):,.0f} ₽\nРентабельность (%):")
         return SET_PLAN_PROF
@@ -432,16 +586,14 @@ async def plan_pay(update, ctx):
 async def plan_prof(update, ctx):
     try:
         raw = update.message.text
-        # Убираем невидимые символы и находим число
         cleaned = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', raw)
         match = re.search(r'(\d+[.,]?\d*)', cleaned)
         if not match:
             raise ValueError("No number found")
         num_str = match.group(1).replace(',', '.')
         v = float(num_str)
-        
         md = get_month_data(ctx.user_data["py"], ctx.user_data["pm"])
-        md["plan_payments"] = ctx.user_data["pp"]   # уже целое
+        md["plan_payments"] = ctx.user_data["pp"]
         md["plan_profitability_pct"] = v
         set_month_data(ctx.user_data["py"], ctx.user_data["pm"], md)
         td = days_in(ctx.user_data["py"], ctx.user_data["pm"])
@@ -481,7 +633,6 @@ async def yplan_year(update, ctx):
 async def yplan_pay(update, ctx):
     try:
         v = _extract_number(update.message.text)
-        # Сохраняем как целое число
         ctx.user_data["ypp"] = int(v)
         await update.message.reply_text(f"✅ {int(v):,.0f} ₽\nРентабельность (%):", parse_mode="Markdown")
         return SET_YPLAN_PROF
@@ -529,7 +680,6 @@ async def fact_s(update, ctx):
 async def fact_cum(update, ctx):
     try:
         v = _extract_number(update.message.text)
-        # Сохраняем как целое число
         ctx.user_data["fc"] = int(v)
         await update.message.reply_text(f"✅ {int(v):,.0f} ₽\nРентабельность (%):")
         return SET_FACT_PROF
@@ -666,7 +816,7 @@ async def retro_val(update, ctx):
         await update.message.reply_text(f"❌ Ошибка: {e}\nПопробуйте ещё раз (например, 5000000)")
         return RETRO_VALUE
 
-# ====== ДАШБОРДЫ (заглушки) ======
+# ====== ДАШБОРДЫ (с графиками, восстановлены) ======
 async def dash_m(update, ctx):
     if not await _chk(update):
         return
@@ -678,7 +828,9 @@ async def dash_m(update, ctx):
     if md["plan_payments"] == 0:
         await msg.reply_text("⚠️ План не установлен.")
         return
-    await msg.reply_text("📊 *Дашборд временно недоступен, ведутся технические работы*", parse_mode="Markdown")
+    t = mtotals(md, now.year, now.month)
+    img = gen_month_dash(md, t)
+    await msg.reply_photo(photo=img, caption=f"📊 {MN[now.month]} {now.year}")
 
 async def dash_y(update, ctx):
     if not await _chk(update):
@@ -691,7 +843,9 @@ async def dash_y(update, ctx):
     if yd["year_plan_payments"] == 0:
         await msg.reply_text("⚠️ Годовой план не установлен. /set_year_plan")
         return
-    await msg.reply_text("📊 *Дашборд года временно недоступен*", parse_mode="Markdown")
+    yt = ytotals(now.year)
+    img = gen_year_dash(yd, yt)
+    await msg.reply_photo(photo=img, caption=f"📊 Год {now.year}")
 
 async def multi_y(update, ctx):
     if not await _chk(update):
@@ -703,7 +857,21 @@ async def multi_y(update, ctx):
     if not years:
         await msg.reply_text("⚠️ Нет данных.")
         return
-    await msg.reply_text("📉 *Динамика по годам временно недоступна*", parse_mode="Markdown")
+    # Собираем данные для графика (необходим полный словарь data)
+    data = {"years": {}}
+    for y in years:
+        yp = get_year_plan(y)
+        data["years"][str(y)] = {
+            "year_plan_payments": yp["year_plan_payments"],
+            "year_plan_profitability_pct": yp["year_plan_profitability_pct"],
+            "months": {}
+        }
+        for m in range(1, 13):
+            md = get_month_data(y, m)
+            if md["plan_payments"] > 0 or md["cumulative_entries"]:
+                data["years"][str(y)]["months"][f"{m:02d}"] = md
+    img = gen_multi_year(data, years)
+    await msg.reply_photo(photo=img, caption="📉 Динамика по годам")
 
 async def summary_m(update, ctx):
     if not await _chk(update):
@@ -732,7 +900,7 @@ async def summary_m(update, ctx):
         parse_mode="Markdown"
     )
 
-# ====== ИСТОРИЯ, ПРЕМИЯ, РАСШИРЕННЫЙ ОТЧЁТ, УПРАВЛЕНИЕ, НАПОМИНАНИЯ, ROUTER ======
+# ====== ИСТОРИЯ ======
 async def hist_s(update, ctx):
     if not await _chk(update):
         return
@@ -760,6 +928,7 @@ async def hist_y_cb(update, ctx):
             lines.append(f"{e} *{MN[mi]}*: {t['fp']:,.0f}/{t['pp']:,.0f} ({t['pctp']:.0f}%) рент {t['fpr']:.1f}%")
     await q.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
+# ====== ПРЕМИЯ ======
 async def my_prem(update, ctx):
     uid = update.callback_query.from_user.id if update.callback_query else update.effective_user.id
     u = get_user(uid)
@@ -821,6 +990,7 @@ async def prem_calc(update, ctx):
             parse_mode="Markdown"
         )
 
+# ====== РАСШ. ОТЧЁТ ======
 async def ext_s(update, ctx):
     if not await _adm(update):
         return ConversationHandler.END
@@ -910,6 +1080,7 @@ async def e_rprof(update, ctx):
         await update.message.reply_text("❌ Введите число")
         return EXT_RPROF
 
+# ====== УПРАВЛЕНИЕ ======
 async def manage(update, ctx):
     if not await _adm(update):
         return
@@ -989,6 +1160,7 @@ async def adm_conf(update, ctx):
     await update.message.reply_text("✅ Админ! 👑")
     return ConversationHandler.END
 
+# ====== НАПОМИНАНИЯ ======
 async def reminder(ctx):
     now = datetime.now()
     if now.day == 15:
@@ -1003,6 +1175,7 @@ async def cancel(update, ctx):
     await update.message.reply_text("❌ /start")
     return ConversationHandler.END
 
+# ====== ROUTER ======
 async def router(update, ctx):
     q = update.callback_query
     cb = q.data
@@ -1165,7 +1338,6 @@ async def handle_api_data(request):
                                  headers={"Access-Control-Allow-Origin": "*"})
 
 async def handle_root(request):
-    """Ответ на health check от Render"""
     return web.Response(text="Bot is alive", status=200)
 
 async def start_api_server():
@@ -1273,7 +1445,7 @@ def main():
     asyncio.set_event_loop(loop)
     loop.run_until_complete(start_api_server())
 
-    print("🤖 Бот v3.4 (Supabase) запущен!")
+    print("🤖 Бот v3.5 (Supabase + графики) запущен!")
     print(f"🌐 API сервер: http://localhost:{API_PORT}/api/data")
     print(f"📱 WebApp URL: {WEBAPP_URL}")
     print("📋 Команды зарегистрированы в меню Telegram.")
