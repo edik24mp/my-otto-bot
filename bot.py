@@ -100,9 +100,10 @@ def get_year_plan(year: int) -> dict:
     return {"year_plan_payments": 0, "year_plan_profitability_pct": 0}
 
 def set_year_plan(year: int, payments: float, profitability: float):
+    # Преобразуем сумму в целое число
     supabase.table("year_plans").upsert({
         "year": year,
-        "plan_payments": payments,
+        "plan_payments": int(payments),
         "plan_profitability": profitability
     }).execute()
 
@@ -126,12 +127,19 @@ def get_month_data(year: int, month: int) -> dict:
     }
 
 def set_month_data(year: int, month: int, data: dict):
+    # Преобразуем суммы в целые числа
+    plan_payments = data.get("plan_payments", 0)
+    if plan_payments is not None:
+        plan_payments = int(plan_payments)
+    result_payments = data.get("result_payments")
+    if result_payments is not None:
+        result_payments = int(result_payments)
     supabase.table("month_data").upsert({
         "year": year,
         "month": month,
-        "plan_payments": data.get("plan_payments", 0),
+        "plan_payments": plan_payments,
         "plan_profitability": data.get("plan_profitability_pct", 0),
-        "result_payments": data.get("result_payments"),
+        "result_payments": result_payments,
         "result_profitability": data.get("result_profitability_pct"),
         "cumulative_entries": data.get("cumulative_entries", [])
     }).execute()
@@ -245,7 +253,7 @@ def ytotals(year):
         "pctp": fp_ / ypp * 100 if ypp else 0, "pctpr": ap / ypr * 100 if ypr else 0, "mr": mr
     }
 
-# ====== ГРАФИКИ (пока заглушки, вы можете потом вставить полный код) ======
+# ====== ГРАФИКИ (пока заглушки) ======
 def gen_month_dash(md, t):
     pass
 
@@ -405,7 +413,6 @@ async def set_plan_s(update, ctx):
     return SET_PLAN_PAY
 
 def _extract_number(text: str) -> float:
-    """Извлекает число из строки, удаляя всё кроме цифр, точки, запятой, минуса."""
     cleaned = re.sub(r'[^0-9.,-]', '', text.replace(',', '.'))
     if not cleaned:
         raise ValueError("No number found")
@@ -414,20 +421,19 @@ def _extract_number(text: str) -> float:
 async def plan_pay(update, ctx):
     try:
         v = _extract_number(update.message.text)
-        ctx.user_data["pp"] = v
-        await update.message.reply_text(f"✅ {v:,.0f} ₽\nРентабельность (%):")
+        # Сохраняем как целое число
+        ctx.user_data["pp"] = int(v)
+        await update.message.reply_text(f"✅ {int(v):,.0f} ₽\nРентабельность (%):")
         return SET_PLAN_PROF
     except Exception:
         await update.message.reply_text("❌ Введите число (например, 1500000)")
         return SET_PLAN_PAY
 
 async def plan_prof(update, ctx):
-    import re
     try:
         raw = update.message.text
-        # 1. Убираем все невидимые управляющие символы
+        # Убираем невидимые символы и находим число
         cleaned = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', raw)
-        # 2. Находим первое число в строке (с точкой или запятой)
         match = re.search(r'(\d+[.,]?\d*)', cleaned)
         if not match:
             raise ValueError("No number found")
@@ -435,7 +441,7 @@ async def plan_prof(update, ctx):
         v = float(num_str)
         
         md = get_month_data(ctx.user_data["py"], ctx.user_data["pm"])
-        md["plan_payments"] = ctx.user_data["pp"]
+        md["plan_payments"] = ctx.user_data["pp"]   # уже целое
         md["plan_profitability_pct"] = v
         set_month_data(ctx.user_data["py"], ctx.user_data["pm"], md)
         td = days_in(ctx.user_data["py"], ctx.user_data["pm"])
@@ -475,8 +481,9 @@ async def yplan_year(update, ctx):
 async def yplan_pay(update, ctx):
     try:
         v = _extract_number(update.message.text)
-        ctx.user_data["ypp"] = v
-        await update.message.reply_text(f"✅ {v:,.0f} ₽\nРентабельность (%):", parse_mode="Markdown")
+        # Сохраняем как целое число
+        ctx.user_data["ypp"] = int(v)
+        await update.message.reply_text(f"✅ {int(v):,.0f} ₽\nРентабельность (%):", parse_mode="Markdown")
         return SET_YPLAN_PROF
     except:
         await update.message.reply_text("❌ Введите число (оплаты на год)")
@@ -522,8 +529,9 @@ async def fact_s(update, ctx):
 async def fact_cum(update, ctx):
     try:
         v = _extract_number(update.message.text)
-        ctx.user_data["fc"] = v
-        await update.message.reply_text(f"✅ {v:,.0f} ₽\nРентабельность (%):")
+        # Сохраняем как целое число
+        ctx.user_data["fc"] = int(v)
+        await update.message.reply_text(f"✅ {int(v):,.0f} ₽\nРентабельность (%):")
         return SET_FACT_PROF
     except:
         await update.message.reply_text("❌ Введите накопленную сумму")
@@ -558,7 +566,6 @@ async def fact_prof(update, ctx):
         return SET_FACT_PROF
 
 # ====== РЕТРО-ВВОД ======
-# (функции retro_* остаются без изменений, кроме _extract_number в retro_val)
 async def retro_s(update, ctx):
     if not await _adm(update):
         return ConversationHandler.END
@@ -626,19 +633,20 @@ async def retro_val(update, ctx):
         md = get_month_data(y, m)
 
         if f == "plan_pay":
-            md["plan_payments"] = _extract_number(txt)
+            md["plan_payments"] = int(_extract_number(txt))
         elif f == "plan_prof":
             md["plan_profitability_pct"] = _extract_number(txt)
         elif f == "fact_pay":
-            md["result_payments"] = _extract_number(txt)
+            val = _extract_number(txt)
+            md["result_payments"] = int(val) if val is not None else None
         elif f == "fact_prof":
             md["result_profitability_pct"] = _extract_number(txt)
         elif f == "all":
             parts = [p.strip() for p in txt.split(",")]
             if len(parts) < 4:
                 raise ValueError("Нужно 4 значения")
-            md["plan_payments"] = _extract_number(parts[0])
-            md["result_payments"] = _extract_number(parts[1])
+            md["plan_payments"] = int(_extract_number(parts[0]))
+            md["result_payments"] = int(_extract_number(parts[1]))
             md["plan_profitability_pct"] = _extract_number(parts[2])
             md["result_profitability_pct"] = _extract_number(parts[3])
 
@@ -725,9 +733,6 @@ async def summary_m(update, ctx):
     )
 
 # ====== ИСТОРИЯ, ПРЕМИЯ, РАСШИРЕННЫЙ ОТЧЁТ, УПРАВЛЕНИЕ, НАПОМИНАНИЯ, ROUTER ======
-# (оставляем как в вашем исходном коде, они без изменений. 
-#  Ниже привожу их без сокращений для целостности файла)
-
 async def hist_s(update, ctx):
     if not await _chk(update):
         return
@@ -829,7 +834,7 @@ async def ext_s(update, ctx):
 
 async def e_np(update, ctx):
     try:
-        ctx.user_data["enp"] = _extract_number(update.message.text)
+        ctx.user_data["enp"] = int(_extract_number(update.message.text))
         await update.message.reply_text("Оплаты ПОСТОЯННЫХ (₽):")
         return EXT_REP_PAY
     except:
@@ -838,7 +843,7 @@ async def e_np(update, ctx):
 
 async def e_rp(update, ctx):
     try:
-        ctx.user_data["erp"] = _extract_number(update.message.text)
+        ctx.user_data["erp"] = int(_extract_number(update.message.text))
         await update.message.reply_text("Кол-во оплат (новые):")
         return EXT_NEW_CNT
     except:
@@ -1165,7 +1170,7 @@ async def handle_root(request):
 
 async def start_api_server():
     app_web = web.Application(middlewares=[cors_middleware(allow_all=True)])
-    app_web.router.add_get("/", handle_root)                      # <-- добавлен обработчик корня
+    app_web.router.add_get("/", handle_root)
     app_web.router.add_post("/api/data", handle_api_data)
     app_web.router.add_options("/api/data", handle_api_data)
     runner = web.AppRunner(app_web)
