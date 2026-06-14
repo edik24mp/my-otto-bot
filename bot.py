@@ -1370,12 +1370,6 @@ async def post_init(app):
         BotCommand("cancel", "Отменить текущее действие"),
     ]
     await app.bot.set_my_commands(commands)
-
-    # --- Установка кнопки меню (веб-приложение) ---
-    # 👇 ЗАМЕНИТЕ НАЗВАНИЕ_ВАШЕГО_РЕПОЗИТОРИЯ на реальное (например, my-otto-frontend)
-    web_app_url = "https://edik24mp.github.io/my-otto-frontend/"
-    menu_button = MenuButtonWebApp(text="📱 Открыть приложение", web_app=WebAppInfo(url=web_app_url))
-    await app.bot.set_chat_menu_button(menu_button=menu_button)
     
 # ====== MAIN ======
 def main():
