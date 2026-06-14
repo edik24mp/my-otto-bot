@@ -8,7 +8,7 @@ import json, os, logging, asyncio, re
 from datetime import datetime, timedelta
 from calendar import monthrange
 from typing import Optional, Dict, List
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, MenuButtonWebApp
 from telegram.ext import (Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, ConversationHandler, ContextTypes, filters)
 import matplotlib; matplotlib.use("Agg")
@@ -29,7 +29,7 @@ PREMIUM_START_MONTH = 9
 SUPABASE_URL = "https://fqoigjvvtvayeobxzaui.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZxb2lnanZ2dHZheWVvYnh6YXVpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTI3NDM0NSwiZXhwIjoyMDk2ODUwMzQ1fQ.n_aESJHrD4ZEOdyyxOP1fpvAERSarpjYF-wJrfTnlOQ"
 
-WEBAPP_URL = "https://edik24mp.github.io/my-otto-app/"
+WEBAPP_URL = "https://edik24mp.github.io/my-otto-frontend/"
 API_PORT = 8443
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO)
@@ -1371,6 +1371,12 @@ async def post_init(app):
     ]
     await app.bot.set_my_commands(commands)
 
+    # --- Установка кнопки меню (веб-приложение) ---
+    # 👇 ЗАМЕНИТЕ НАЗВАНИЕ_ВАШЕГО_РЕПОЗИТОРИЯ на реальное (например, my-otto-frontend)
+    web_app_url = "https://edik24mp.github.io/НАЗВАНИЕ_ВАШЕГО_РЕПОЗИТОРИЯ/"
+    menu_button = MenuButtonWebApp(text="📱 Открыть приложение", web_app=WebAppInfo(url=web_app_url))
+    await app.bot.set_chat_menu_button(menu_button=menu_button)
+    
 # ====== MAIN ======
 def main():
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
