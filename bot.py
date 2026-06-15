@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v3.6 (Supabase + графики + темп выполнения)
+TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v3.7 (корректный учёт дней)
 pip install "python-telegram-bot[job-queue]>=21.0" matplotlib numpy aiohttp supabase
 """
 import json, os, logging, asyncio, re
@@ -34,14 +34,14 @@ API_PORT = 8443
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO)
 
-# Состояния (добавлены EXT_SEL_YEAR, EXT_SEL_MONTH – теперь 26 состояний)
+# Состояния
 (
     REG_NAME, REG_POSITION,
     SET_PLAN_PAY, SET_PLAN_PROF,
     SET_YPLAN_YEAR, SET_YPLAN_PAY, SET_YPLAN_PROF,
     SET_FACT_CUM, SET_FACT_PROF,
     RETRO_SEL_YEAR, RETRO_SEL_MONTH, RETRO_SEL_FIELD, RETRO_VALUE,
-    EXT_SEL_YEAR, EXT_SEL_MONTH,                     # новые
+    EXT_SEL_YEAR, EXT_SEL_MONTH,
     EXT_NEW_PAY, EXT_REP_PAY, EXT_NEW_CNT, EXT_RCR, EXT_RCF, EXT_NPROF, EXT_RPROF,
     BAN_SEL, BAN_CONF, ADM_SEL, ADM_CONF,
 ) = range(26)
@@ -198,6 +198,11 @@ def mtotals(md, y, m, ref=None):
             ref = td
         else:
             ref = 1
+
+    # Корректировка: прошло дней = ref-1, осталось = td - ref + 1
+    elapsed = ref - 1
+    remaining = td - ref + 1
+
     pp = md.get("plan_payments", 0)
     ppr = md.get("plan_profitability_pct", 0)
     rp = md.get("result_payments")
@@ -207,31 +212,44 @@ def mtotals(md, y, m, ref=None):
     pvs = [v["profitability_pct"] for v in df.values() if v["profitability_pct"] > 0]
     fpr = rpr if rpr is not None else (sum(pvs) / len(pvs) if pvs else 0)
 
-    # План на сегодня (накопленный по дням)
-    plan_today = (pp / td) * ref if td else 0
+    # План на сегодня (только прошедшие дни)
+    if elapsed > 0:
+        plan_today = (pp / td) * elapsed
+    else:
+        plan_today = 0
     pct_today = (fp / plan_today * 100) if plan_today > 0 else 0
 
-    ideal = pp * ref / td if td else 0
+    # Отставание/опережение по оплатам (идеал по прошедшим дням)
+    ideal = (pp / td) * elapsed if td else 0
     lag = ideal - fp
+
+    rem = pp - fp  # осталось сделать
+    # Нужно в день (оставшиеся дни включая сегодня)
+    dn = rem / remaining if remaining > 0 else rem
+    avgd = pp / td if td else 0
+
     pctp = fp / pp * 100 if pp else 0
     pctpr = fpr / ppr * 100 if ppr else 0
     lagpr = ppr - fpr
-    rem = pp - fp
-    # Исправленный расчёт: учитываем текущий день
-    wr = td - ref + 1   # оставшиеся дни включая сегодня
-    dn = rem / wr if wr > 0 else rem
-    avgd = pp / td if td else 0
+
     ents = md.get("cumulative_entries", [])
+    behind = lag > 0
+    ahead = pctp >= 100 or lag < -pp * 0.05
+
     return {
-        "year": y, "month": m, "mn": MN.get(m, ""), "ref": ref, "td": td,
-        "pp": pp, "ppr": ppr, "fp": fp, "fpr": fpr,
+        "year": y, "month": m, "mn": MN.get(m, ""),
+        "ref": ref, "td": td,
+        "elapsed": elapsed,      # прошло дней (без учёта сегодня)
+        "remaining": remaining,  # осталось дней (включая сегодня)
+        "pp": pp, "ppr": ppr,
+        "fp": fp, "fpr": fpr,
         "lc": ents[-1]["cumulative_payments"] if ents else 0,
         "ld": ents[-1]["date"] if ents else None,
-        "pctp": pctp, "pctpr": pctpr, "lag": lag, "lagpr": lagpr,
+        "pctp": pctp, "pctpr": pctpr,
+        "lag": lag, "lagpr": lagpr,
         "rem": rem, "dn": dn, "avgd": avgd,
-        "elapsed": ref, "remaining": td - ref,
-        "df": df, "behind": lag > 0, "ahead": pctp >= 100 or lag < -pp * 0.05,
-        "pct_today": pct_today   # новый показатель
+        "df": df, "behind": behind, "ahead": ahead,
+        "pct_today": pct_today
     }
 
 def ytotals(year):
@@ -259,7 +277,7 @@ def ytotals(year):
         "pctp": fp_ / ypp * 100 if ypp else 0, "pctpr": ap / ypr * 100 if ypr else 0, "mr": mr
     }
 
-# ====== ГРАФИКИ (светлая тема, восстановлены из v3.3) ======
+# ====== ГРАФИКИ (светлая тема, без изменений) ======
 def gen_month_dash(md, t):
     fig = plt.figure(figsize=(14,20), facecolor="#FFFFFF")
     BG, CB, T, TS = "#FFFFFF", "#F8F9FA", "#212529", "#6C757D"
@@ -898,7 +916,7 @@ async def summary_m(update, ctx):
     bar = "█" * min(n, 20) + "░" * max(20 - n, 0)
     await msg.reply_text(
         f"{si} *{MN[now.month]} {now.year} — {st}*\n"
-        f"📅 День {now.day} из {t['td']} ({t['remaining']} ост.)\n\n"
+        f"📅 День {now.day} (прошло {t['elapsed']} из {t['td']}, осталось {t['remaining']})\n\n"
         f"💰 *ОПЛАТЫ*\nПлан: {t['pp']:>12,.0f} ₽\nФакт: {t['fp']:>12,.0f} ₽\n"
         f"[{bar}] {t['pctp']:.1f}%\n"
         f"📈 *Темп выполнения:* {t['pct_today']:.1f}%\n"
@@ -998,13 +1016,12 @@ async def prem_calc(update, ctx):
             parse_mode="Markdown"
         )
 
-# ====== РАСШ. ОТЧЁТ (новый – выбор года и месяца) ======
+# ====== РАСШ. ОТЧЁТ ======
 async def ext_s(update, ctx):
     if not await _adm(update):
         return ConversationHandler.END
     if update.callback_query:
         await update.callback_query.answer()
-    # Предлагаем выбрать год (с 2024 по текущий)
     years = list(range(2024, datetime.now().year + 1))
     kb = [[InlineKeyboardButton(str(y), callback_data=f"ext_year_{y}")] for y in years]
     await _msg(update).reply_text("📅 *Выберите год для расширенного отчёта:*", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
@@ -1015,7 +1032,6 @@ async def ext_sel_year(update, ctx):
     await q.answer()
     year = int(q.data.replace("ext_year_", ""))
     ctx.user_data["ext_year"] = year
-    # Предлагаем выбрать месяц
     kb = [[InlineKeyboardButton(MN[m], callback_data=f"ext_month_{m}")] for m in range(1, 13)]
     await q.message.reply_text(f"📆 *Год {year}* – выберите месяц:", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
     return EXT_SEL_MONTH
@@ -1025,11 +1041,9 @@ async def ext_sel_month(update, ctx):
     await q.answer()
     month = int(q.data.replace("ext_month_", ""))
     ctx.user_data["ext_month"] = month
-    # Начинаем ввод данных как раньше
     await q.message.reply_text(f"📋 *{MN[month]} {ctx.user_data['ext_year']}*\n\nОплаты НОВЫХ (₽):", parse_mode="Markdown")
     return EXT_NEW_PAY
 
-# Далее идут те же функции e_np, e_rp, e_nc, e_rcr, e_rcf, e_nprof, e_rprof, но они работают с ext_year и ext_month
 async def e_np(update, ctx):
     try:
         ctx.user_data["enp"] = int(_extract_number(update.message.text))
@@ -1295,7 +1309,7 @@ def build_api_response(user_id):
                 "is_behind": t["behind"], "is_ahead": t["ahead"],
                 "daily_facts": {str(k): v for k, v in t["df"].items()},
                 "cumulative_entries": md.get("cumulative_entries", []),
-                "pct_today": t["pct_today"]    # новый показатель для фронтенда
+                "pct_today": t["pct_today"]
             }
     except Exception:
         pass
@@ -1441,7 +1455,6 @@ def main():
                 RETRO_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, retro_val)]},
         fallbacks=[CommandHandler("cancel", cancel)]
     ))
-    # Новый обработчик для расширенного отчёта
     app.add_handler(ConversationHandler(
         entry_points=[CommandHandler("ext_report", ext_s), CallbackQueryHandler(ext_s, pattern="^ext_report$")],
         states={
@@ -1481,7 +1494,7 @@ def main():
     asyncio.set_event_loop(loop)
     loop.run_until_complete(start_api_server())
 
-    print("🤖 Бот v3.6 (Supabase + графики + темп выполнения + расшир. отчёт за любой месяц) запущен!")
+    print("🤖 Бот v3.7 (корректный учёт дней) запущен!")
     print(f"🌐 API сервер: http://localhost:{API_PORT}/api/data")
     print(f"📱 WebApp URL: {WEBAPP_URL}")
     print("📋 Команды зарегистрированы в меню Telegram.")
