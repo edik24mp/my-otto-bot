@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v3.5 (Supabase + графики)
+TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v3.6 (Supabase + графики + темп выполнения)
 pip install "python-telegram-bot[job-queue]>=21.0" matplotlib numpy aiohttp supabase
 """
 import json, os, logging, asyncio, re
@@ -34,16 +34,17 @@ API_PORT = 8443
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO)
 
-# Состояния
+# Состояния (добавлены EXT_SEL_YEAR, EXT_SEL_MONTH – теперь 26 состояний)
 (
     REG_NAME, REG_POSITION,
     SET_PLAN_PAY, SET_PLAN_PROF,
     SET_YPLAN_YEAR, SET_YPLAN_PAY, SET_YPLAN_PROF,
     SET_FACT_CUM, SET_FACT_PROF,
     RETRO_SEL_YEAR, RETRO_SEL_MONTH, RETRO_SEL_FIELD, RETRO_VALUE,
+    EXT_SEL_YEAR, EXT_SEL_MONTH,                     # новые
     EXT_NEW_PAY, EXT_REP_PAY, EXT_NEW_CNT, EXT_RCR, EXT_RCF, EXT_NPROF, EXT_RPROF,
     BAN_SEL, BAN_CONF, ADM_SEL, ADM_CONF,
-) = range(24)
+) = range(26)
 
 MN = {1:"Январь",2:"Февраль",3:"Март",4:"Апрель",5:"Май",6:"Июнь",
       7:"Июль",8:"Август",9:"Сентябрь",10:"Октябрь",11:"Ноябрь",12:"Декабрь"}
@@ -205,13 +206,19 @@ def mtotals(md, y, m, ref=None):
     fp = rp if rp is not None else sum(v["payments"] for v in df.values())
     pvs = [v["profitability_pct"] for v in df.values() if v["profitability_pct"] > 0]
     fpr = rpr if rpr is not None else (sum(pvs) / len(pvs) if pvs else 0)
+
+    # План на сегодня (накопленный по дням)
+    plan_today = (pp / td) * ref if td else 0
+    pct_today = (fp / plan_today * 100) if plan_today > 0 else 0
+
     ideal = pp * ref / td if td else 0
     lag = ideal - fp
     pctp = fp / pp * 100 if pp else 0
     pctpr = fpr / ppr * 100 if ppr else 0
     lagpr = ppr - fpr
     rem = pp - fp
-    wr = td - ref
+    # Исправленный расчёт: учитываем текущий день
+    wr = td - ref + 1   # оставшиеся дни включая сегодня
     dn = rem / wr if wr > 0 else rem
     avgd = pp / td if td else 0
     ents = md.get("cumulative_entries", [])
@@ -223,7 +230,8 @@ def mtotals(md, y, m, ref=None):
         "pctp": pctp, "pctpr": pctpr, "lag": lag, "lagpr": lagpr,
         "rem": rem, "dn": dn, "avgd": avgd,
         "elapsed": ref, "remaining": td - ref,
-        "df": df, "behind": lag > 0, "ahead": pctp >= 100 or lag < -pp * 0.05
+        "df": df, "behind": lag > 0, "ahead": pctp >= 100 or lag < -pp * 0.05,
+        "pct_today": pct_today   # новый показатель
     }
 
 def ytotals(year):
@@ -816,7 +824,7 @@ async def retro_val(update, ctx):
         await update.message.reply_text(f"❌ Ошибка: {e}\nПопробуйте ещё раз (например, 5000000)")
         return RETRO_VALUE
 
-# ====== ДАШБОРДЫ (с графиками, восстановлены) ======
+# ====== ДАШБОРДЫ (с графиками) ======
 async def dash_m(update, ctx):
     if not await _chk(update):
         return
@@ -857,7 +865,6 @@ async def multi_y(update, ctx):
     if not years:
         await msg.reply_text("⚠️ Нет данных.")
         return
-    # Собираем данные для графика (необходим полный словарь data)
     data = {"years": {}}
     for y in years:
         yp = get_year_plan(y)
@@ -894,6 +901,7 @@ async def summary_m(update, ctx):
         f"📅 День {now.day} из {t['td']} ({t['remaining']} ост.)\n\n"
         f"💰 *ОПЛАТЫ*\nПлан: {t['pp']:>12,.0f} ₽\nФакт: {t['fp']:>12,.0f} ₽\n"
         f"[{bar}] {t['pctp']:.1f}%\n"
+        f"📈 *Темп выполнения:* {t['pct_today']:.1f}%\n"
         f"{'❗' if t['behind'] else '🚀'} {abs(t['lag']):,.0f} ₽\n"
         f"⚡ Нужно/день: *{t['dn']:,.0f} ₽*\n\n"
         f"📈 Рент: {t['fpr']:.1f}% / {t['ppr']:.1f}%",
@@ -990,18 +998,38 @@ async def prem_calc(update, ctx):
             parse_mode="Markdown"
         )
 
-# ====== РАСШ. ОТЧЁТ ======
+# ====== РАСШ. ОТЧЁТ (новый – выбор года и месяца) ======
 async def ext_s(update, ctx):
     if not await _adm(update):
         return ConversationHandler.END
     if update.callback_query:
         await update.callback_query.answer()
-    now = datetime.now()
-    ry, rm = (now.year - 1, 12) if now.month == 1 else (now.year, now.month - 1)
-    ctx.user_data["ey"], ctx.user_data["em"] = ry, rm
-    await _msg(update).reply_text(f"📋 *{MN[rm]} {ry}*\n\nОплаты НОВЫХ (₽):", parse_mode="Markdown")
+    # Предлагаем выбрать год (с 2024 по текущий)
+    years = list(range(2024, datetime.now().year + 1))
+    kb = [[InlineKeyboardButton(str(y), callback_data=f"ext_year_{y}")] for y in years]
+    await _msg(update).reply_text("📅 *Выберите год для расширенного отчёта:*", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+    return EXT_SEL_YEAR
+
+async def ext_sel_year(update, ctx):
+    q = update.callback_query
+    await q.answer()
+    year = int(q.data.replace("ext_year_", ""))
+    ctx.user_data["ext_year"] = year
+    # Предлагаем выбрать месяц
+    kb = [[InlineKeyboardButton(MN[m], callback_data=f"ext_month_{m}")] for m in range(1, 13)]
+    await q.message.reply_text(f"📆 *Год {year}* – выберите месяц:", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+    return EXT_SEL_MONTH
+
+async def ext_sel_month(update, ctx):
+    q = update.callback_query
+    await q.answer()
+    month = int(q.data.replace("ext_month_", ""))
+    ctx.user_data["ext_month"] = month
+    # Начинаем ввод данных как раньше
+    await q.message.reply_text(f"📋 *{MN[month]} {ctx.user_data['ext_year']}*\n\nОплаты НОВЫХ (₽):", parse_mode="Markdown")
     return EXT_NEW_PAY
 
+# Далее идут те же функции e_np, e_rp, e_nc, e_rcr, e_rcf, e_nprof, e_rprof, но они работают с ext_year и ext_month
 async def e_np(update, ctx):
     try:
         ctx.user_data["enp"] = int(_extract_number(update.message.text))
@@ -1059,7 +1087,8 @@ async def e_nprof(update, ctx):
 async def e_rprof(update, ctx):
     try:
         v = _extract_number(update.message.text)
-        y, m = ctx.user_data["ey"], ctx.user_data["em"]
+        y = ctx.user_data["ext_year"]
+        m = ctx.user_data["ext_month"]
         np_, rp_ = ctx.user_data["enp"], ctx.user_data["erp"]
         tp_ = np_ + rp_
         nac = np_ / ctx.user_data["enc"] if ctx.user_data["enc"] else 0
@@ -1266,6 +1295,7 @@ def build_api_response(user_id):
                 "is_behind": t["behind"], "is_ahead": t["ahead"],
                 "daily_facts": {str(k): v for k, v in t["df"].items()},
                 "cumulative_entries": md.get("cumulative_entries", []),
+                "pct_today": t["pct_today"]    # новый показатель для фронтенда
             }
     except Exception:
         pass
@@ -1370,10 +1400,8 @@ async def post_init(app):
         BotCommand("cancel", "Отменить текущее действие"),
     ]
     await app.bot.set_my_commands(commands)
-    
-    # Убираем кастомную кнопку, если она вдруг где-то установлена
     await app.bot.set_chat_menu_button(menu_button=None)
-    
+
 # ====== MAIN ======
 def main():
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
@@ -1413,15 +1441,20 @@ def main():
                 RETRO_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, retro_val)]},
         fallbacks=[CommandHandler("cancel", cancel)]
     ))
+    # Новый обработчик для расширенного отчёта
     app.add_handler(ConversationHandler(
         entry_points=[CommandHandler("ext_report", ext_s), CallbackQueryHandler(ext_s, pattern="^ext_report$")],
-        states={EXT_NEW_PAY: [MessageHandler(filters.TEXT & ~filters.COMMAND, e_np)],
-                EXT_REP_PAY: [MessageHandler(filters.TEXT & ~filters.COMMAND, e_rp)],
-                EXT_NEW_CNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, e_nc)],
-                EXT_RCR: [MessageHandler(filters.TEXT & ~filters.COMMAND, e_rcr)],
-                EXT_RCF: [MessageHandler(filters.TEXT & ~filters.COMMAND, e_rcf)],
-                EXT_NPROF: [MessageHandler(filters.TEXT & ~filters.COMMAND, e_nprof)],
-                EXT_RPROF: [MessageHandler(filters.TEXT & ~filters.COMMAND, e_rprof)]},
+        states={
+            EXT_SEL_YEAR: [CallbackQueryHandler(ext_sel_year, pattern="^ext_year_")],
+            EXT_SEL_MONTH: [CallbackQueryHandler(ext_sel_month, pattern="^ext_month_")],
+            EXT_NEW_PAY: [MessageHandler(filters.TEXT & ~filters.COMMAND, e_np)],
+            EXT_REP_PAY: [MessageHandler(filters.TEXT & ~filters.COMMAND, e_rp)],
+            EXT_NEW_CNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, e_nc)],
+            EXT_RCR: [MessageHandler(filters.TEXT & ~filters.COMMAND, e_rcr)],
+            EXT_RCF: [MessageHandler(filters.TEXT & ~filters.COMMAND, e_rcf)],
+            EXT_NPROF: [MessageHandler(filters.TEXT & ~filters.COMMAND, e_nprof)],
+            EXT_RPROF: [MessageHandler(filters.TEXT & ~filters.COMMAND, e_rprof)],
+        },
         fallbacks=[CommandHandler("cancel", cancel)]
     ))
     app.add_handler(ConversationHandler(
@@ -1448,7 +1481,7 @@ def main():
     asyncio.set_event_loop(loop)
     loop.run_until_complete(start_api_server())
 
-    print("🤖 Бот v3.5 (Supabase + графики) запущен!")
+    print("🤖 Бот v3.6 (Supabase + графики + темп выполнения + расшир. отчёт за любой месяц) запущен!")
     print(f"🌐 API сервер: http://localhost:{API_PORT}/api/data")
     print(f"📱 WebApp URL: {WEBAPP_URL}")
     print("📋 Команды зарегистрированы в меню Telegram.")
