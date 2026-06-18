@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v3.7 (корректный учёт дней)
+TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v3.8 (последняя рентабельность, обновлённые названия, права доступа)
 pip install "python-telegram-bot[job-queue]>=21.0" matplotlib numpy aiohttp supabase
 """
 import json, os, logging, asyncio, re
@@ -199,7 +199,6 @@ def mtotals(md, y, m, ref=None):
         else:
             ref = 1
 
-    # Корректировка: прошло дней = ref-1, осталось = td - ref + 1
     elapsed = ref - 1
     remaining = td - ref + 1
 
@@ -209,22 +208,31 @@ def mtotals(md, y, m, ref=None):
     rpr = md.get("result_profitability_pct")
     df = daily_from_cum(md, y, m)
     fp = rp if rp is not None else sum(v["payments"] for v in df.values())
-    pvs = [v["profitability_pct"] for v in df.values() if v["profitability_pct"] > 0]
-    fpr = rpr if rpr is not None else (sum(pvs) / len(pvs) if pvs else 0)
 
-    # План на сегодня (только прошедшие дни)
+    # ----- ИЗМЕНЕНИЕ: рентабельность – последняя внесённая -----
+    ents = md.get("cumulative_entries", [])
+    if ents:
+        # сортируем по дате, берём последнюю
+        last_entry = sorted(ents, key=lambda x: x["date"])[-1]
+        fpr = last_entry.get("profitability_pct", 0)
+    elif rpr is not None:
+        fpr = rpr
+    else:
+        fpr = 0
+    # -----------------------------------------------------------
+
+    # План на сегодня
     if elapsed > 0:
         plan_today = (pp / td) * elapsed
     else:
         plan_today = 0
     pct_today = (fp / plan_today * 100) if plan_today > 0 else 0
 
-    # Отставание/опережение по оплатам (идеал по прошедшим дням)
+    # Отставание/опережение
     ideal = (pp / td) * elapsed if td else 0
     lag = ideal - fp
 
-    rem = pp - fp  # осталось сделать
-    # Нужно в день (оставшиеся дни включая сегодня)
+    rem = pp - fp
     dn = rem / remaining if remaining > 0 else rem
     avgd = pp / td if td else 0
 
@@ -232,15 +240,14 @@ def mtotals(md, y, m, ref=None):
     pctpr = fpr / ppr * 100 if ppr else 0
     lagpr = ppr - fpr
 
-    ents = md.get("cumulative_entries", [])
     behind = lag > 0
     ahead = pctp >= 100 or lag < -pp * 0.05
 
     return {
         "year": y, "month": m, "mn": MN.get(m, ""),
         "ref": ref, "td": td,
-        "elapsed": elapsed,      # прошло дней (без учёта сегодня)
-        "remaining": remaining,  # осталось дней (включая сегодня)
+        "elapsed": elapsed,
+        "remaining": remaining,
         "pp": pp, "ppr": ppr,
         "fp": fp, "fpr": fpr,
         "lc": ents[-1]["cumulative_payments"] if ents else 0,
@@ -277,7 +284,7 @@ def ytotals(year):
         "pctp": fp_ / ypp * 100 if ypp else 0, "pctpr": ap / ypr * 100 if ypr else 0, "mr": mr
     }
 
-# ====== ГРАФИКИ (светлая тема, без изменений) ======
+# ====== ГРАФИКИ (без изменений) ======
 def gen_month_dash(md, t):
     fig = plt.figure(figsize=(14,20), facecolor="#FFFFFF")
     BG, CB, T, TS = "#FFFFFF", "#F8F9FA", "#212529", "#6C757D"
@@ -484,12 +491,14 @@ async def start(update, ctx):
             miss.append(f"📋 План {MN[now.month]} {now.year}")
         miss.append("✏️ Ретро-данные за прошлые периоды")
         mt = "\n".join(f"  • {m}" for m in miss)
-        kb = [[InlineKeyboardButton("📋 План месяца", callback_data="set_plan")],
-              [InlineKeyboardButton("📝 Внести факт", callback_data="add_fact")],
-              [InlineKeyboardButton("📅 Годовой план", callback_data="year_plan")],
-              [InlineKeyboardButton("✏️ Ретро-данные", callback_data="retro")],
-              [InlineKeyboardButton("📊 Дашборд", callback_data="dash_m")],
-              [InlineKeyboardButton("👥 Управление", callback_data="manage")]]
+        kb = [
+            [InlineKeyboardButton("📋 План месяца", callback_data="set_plan")],
+            [InlineKeyboardButton("📝 Внести факт", callback_data="add_fact")],
+            [InlineKeyboardButton("📅 Годовой план", callback_data="year_plan")],
+            [InlineKeyboardButton("✏️ Ретро-данные", callback_data="retro")],
+            [InlineKeyboardButton("📊 Дашборд месяца", callback_data="dash_m")],
+            [InlineKeyboardButton("👥 Управление", callback_data="manage")]
+        ]
         await update.message.reply_text(
             f"👑 *Добро пожаловать, {nm}!*\n\n"
             f"Я узнал тебя — ты *главный администратор*.\n\n"
@@ -512,10 +521,10 @@ async def start(update, ctx):
             hints.append("⚠️ Нет фактов")
         ht = ("\n" + "\n".join(hints)) if hints else ""
         kb = [
-            [InlineKeyboardButton("📋 План месяца", callback_data="set_plan"), InlineKeyboardButton("📊 Дашборд", callback_data="dash_m")],
-            [InlineKeyboardButton("📝 Внести факт", callback_data="add_fact"), InlineKeyboardButton("📈 Сводка", callback_data="summary")],
-            [InlineKeyboardButton("📅 Годовой план", callback_data="year_plan"), InlineKeyboardButton("📊 Год", callback_data="dash_y")],
-            [InlineKeyboardButton("📋 Расш. отчёт", callback_data="ext_report"), InlineKeyboardButton("📉 Динамика", callback_data="multi_y")],
+            [InlineKeyboardButton("📋 План месяца", callback_data="set_plan"), InlineKeyboardButton("📊 Дашборд месяца", callback_data="dash_m")],
+            [InlineKeyboardButton("📝 Внести факт", callback_data="add_fact"), InlineKeyboardButton("📈 Текущая сводка", callback_data="summary")],
+            [InlineKeyboardButton("📅 Годовой план", callback_data="year_plan"), InlineKeyboardButton("📊 Дашборд по году", callback_data="dash_y")],
+            [InlineKeyboardButton("📋 Расш. отчёт", callback_data="ext_report"), InlineKeyboardButton("📉 Динамика по годам", callback_data="multi_y")],
             [InlineKeyboardButton("🕐 История", callback_data="history"), InlineKeyboardButton("✏️ Ретро", callback_data="retro")],
             [InlineKeyboardButton("👥 Управление", callback_data="manage")]
         ]
@@ -527,8 +536,8 @@ async def start(update, ctx):
         )
     else:
         kb = [
-            [InlineKeyboardButton("📊 Дашборд", callback_data="dash_m"), InlineKeyboardButton("📈 Сводка", callback_data="summary")],
-            [InlineKeyboardButton("📊 Год", callback_data="dash_y"), InlineKeyboardButton("📉 Динамика", callback_data="multi_y")],
+            [InlineKeyboardButton("📊 Дашборд месяца", callback_data="dash_m"), InlineKeyboardButton("📈 Текущая сводка", callback_data="summary")],
+            [InlineKeyboardButton("📊 Дашборд по году", callback_data="dash_y"), InlineKeyboardButton("📉 Динамика по годам", callback_data="multi_y")],
             [InlineKeyboardButton("📋 Расш. отчёт", callback_data="view_ext"), InlineKeyboardButton("🕐 История", callback_data="history")]
         ]
         if u and u.get("position") == "manager":
@@ -842,7 +851,7 @@ async def retro_val(update, ctx):
         await update.message.reply_text(f"❌ Ошибка: {e}\nПопробуйте ещё раз (например, 5000000)")
         return RETRO_VALUE
 
-# ====== ДАШБОРДЫ (с графиками) ======
+# ====== ДАШБОРДЫ ======
 async def dash_m(update, ctx):
     if not await _chk(update):
         return
@@ -954,7 +963,7 @@ async def hist_y_cb(update, ctx):
             lines.append(f"{e} *{MN[mi]}*: {t['fp']:,.0f}/{t['pp']:,.0f} ({t['pctp']:.0f}%) рент {t['fpr']:.1f}%")
     await q.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
-# ====== ПРЕМИЯ ======
+# ====== ПРЕМИЯ (исправлено) ======
 async def my_prem(update, ctx):
     uid = update.callback_query.from_user.id if update.callback_query else update.effective_user.id
     u = get_user(uid)
@@ -998,21 +1007,26 @@ async def prem_calc(update, ctx):
     now = datetime.now()
     ic = sy == now.year and sm == now.month
     if fp == 0 and pp == 0:
-        await q.message.reply_text("😕 Нет данных.")
+        await q.message.reply_text("😕 Нет данных за этот месяц.")
         return
+
+    # Расчёт премии
+    premium_now = fp * (fpr / 100) * 0.01
+    premium_plan = pp * (ppr / 100) * 0.01
+
     if ic:
-        cp = fp * (fpr / 100) * 0.01
-        pot = pp * (ppr / 100) * 0.01
+        # Текущий месяц
         await q.message.reply_text(
-            f"💰 *{dn_}*, за {MN[sm]} сейчас: *{cp:,.0f} ₽*!\n_{fp:,.0f}×{fpr:.1f}%×1%_\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"При выполнении плана: *{pot:,.0f} ₽*! 🤯\n_{pp:,.0f}×{ppr:.1f}%×1%_\n\nПоднажми! 🚀",
+            f"💰 *Твоя премия с текущими показателями:* {premium_now:,.0f} ₽\n"
+            f"🎯 *При выполнении плановых показателей:* {premium_plan:,.0f} ₽\n\n"
+            f"🔥 Держи планку! 💪🚀",
             parse_mode="Markdown"
         )
     else:
-        pr = fp * (fpr / 100) * 0.01
+        # Закрытый месяц – только фактическая премия
         await q.message.reply_text(
-            f"💰 *{dn_}*, за {MN[sm]} {sy}: *{pr:,.0f} ₽*! 💸\n_{fp:,.0f}×{fpr:.1f}%×1%_",
+            f"💰 *Твоя премия за {MN[sm]} {sy}:* {premium_now:,.0f} ₽\n\n"
+            f"✨ Отличный результат! 👏",
             parse_mode="Markdown"
         )
 
@@ -1395,21 +1409,16 @@ async def start_api_server():
     await site.start()
     logging.info(f"API server started on port {API_PORT}")
 
-# ====== МЕНЮ КОМАНД ======
+# ====== МЕНЮ КОМАНД (только общие команды, без админских) ======
 async def post_init(app):
     from telegram import BotCommand
     commands = [
         BotCommand("start", "Главное меню"),
-        BotCommand("dashboard", "Дашборд текущего месяца"),
-        BotCommand("summary", "Текстовая сводка месяца"),
-        BotCommand("set_plan", "Установить план на месяц"),
-        BotCommand("add_fact", "Внести накопительный факт"),
-        BotCommand("set_year_plan", "Годовой план"),
-        BotCommand("year_dashboard", "Дашборд года"),
+        BotCommand("dashboard", "Дашборд месяца"),
+        BotCommand("summary", "Текущая сводка"),
+        BotCommand("year_dashboard", "Дашборд по году"),
         BotCommand("dynamics", "Динамика по годам"),
         BotCommand("history", "История по месяцам/годам"),
-        BotCommand("retro", "Ретро-ввод данных"),
-        BotCommand("ext_report", "Расширенный отчёт"),
         BotCommand("my_premium", "Моя премия (менеджер)"),
         BotCommand("cancel", "Отменить текущее действие"),
     ]
@@ -1494,7 +1503,7 @@ def main():
     asyncio.set_event_loop(loop)
     loop.run_until_complete(start_api_server())
 
-    print("🤖 Бот v3.7 (корректный учёт дней) запущен!")
+    print("🤖 Бот v3.8 (последняя рентабельность, обновлённые названия, права доступа) запущен!")
     print(f"🌐 API сервер: http://localhost:{API_PORT}/api/data")
     print(f"📱 WebApp URL: {WEBAPP_URL}")
     print("📋 Команды зарегистрированы в меню Telegram.")
