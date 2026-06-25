@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v3.8 (последняя рентабельность, обновлённые названия, права доступа)
+TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v3.9 (поддержка userId в API, исправлена сводка)
 pip install "python-telegram-bot[job-queue]>=21.0" matplotlib numpy aiohttp supabase
 """
 import json, os, logging, asyncio, re
@@ -209,17 +209,15 @@ def mtotals(md, y, m, ref=None):
     df = daily_from_cum(md, y, m)
     fp = rp if rp is not None else sum(v["payments"] for v in df.values())
 
-    # ----- ИЗМЕНЕНИЕ: рентабельность – последняя внесённая -----
+    # Рентабельность – последняя внесённая
     ents = md.get("cumulative_entries", [])
     if ents:
-        # сортируем по дате, берём последнюю
         last_entry = sorted(ents, key=lambda x: x["date"])[-1]
         fpr = last_entry.get("profitability_pct", 0)
     elif rpr is not None:
         fpr = rpr
     else:
         fpr = 0
-    # -----------------------------------------------------------
 
     # План на сегодня
     if elapsed > 0:
@@ -907,6 +905,7 @@ async def multi_y(update, ctx):
     img = gen_multi_year(data, years)
     await msg.reply_photo(photo=img, caption="📉 Динамика по годам")
 
+# ====== СВОДКА (исправлена) ======
 async def summary_m(update, ctx):
     if not await _chk(update):
         return
@@ -923,13 +922,20 @@ async def summary_m(update, ctx):
     st = "ПЕРЕВЫПОЛНЕНИЕ" if t["ahead"] else ("ОТСТАВАНИЕ" if t["behind"] else "В НОРМЕ")
     n = int(t["pctp"] // 5)
     bar = "█" * min(n, 20) + "░" * max(20 - n, 0)
+
+    # Формируем строку отставания/перевыполнения
+    if t['behind']:
+        lag_text = f"❗ Отставание: {abs(t['lag']):,.0f} ₽"
+    else:
+        lag_text = f"🚀 Перевыполнение: {abs(t['lag']):,.0f} ₽"
+
     await msg.reply_text(
         f"{si} *{MN[now.month]} {now.year} — {st}*\n"
         f"📅 День {now.day} (прошло {t['elapsed']} из {t['td']}, осталось {t['remaining']})\n\n"
         f"💰 *ОПЛАТЫ*\nПлан: {t['pp']:>12,.0f} ₽\nФакт: {t['fp']:>12,.0f} ₽\n"
         f"[{bar}] {t['pctp']:.1f}%\n"
         f"📈 *Темп выполнения:* {t['pct_today']:.1f}%\n"
-        f"{'❗' if t['behind'] else '🚀'} {abs(t['lag']):,.0f} ₽\n"
+        f"{lag_text}\n"
         f"⚡ Нужно/день: *{t['dn']:,.0f} ₽*\n\n"
         f"📈 Рент: {t['fpr']:.1f}% / {t['ppr']:.1f}%",
         parse_mode="Markdown"
@@ -963,7 +969,7 @@ async def hist_y_cb(update, ctx):
             lines.append(f"{e} *{MN[mi]}*: {t['fp']:,.0f}/{t['pp']:,.0f} ({t['pctp']:.0f}%) рент {t['fpr']:.1f}%")
     await q.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
-# ====== ПРЕМИЯ (исправлено) ======
+# ====== ПРЕМИЯ ======
 async def my_prem(update, ctx):
     uid = update.callback_query.from_user.id if update.callback_query else update.effective_user.id
     u = get_user(uid)
@@ -1010,12 +1016,10 @@ async def prem_calc(update, ctx):
         await q.message.reply_text("😕 Нет данных за этот месяц.")
         return
 
-    # Расчёт премии
     premium_now = fp * (fpr / 100) * 0.01
     premium_plan = pp * (ppr / 100) * 0.01
 
     if ic:
-        # Текущий месяц
         await q.message.reply_text(
             f"💰 *Твоя премия с текущими показателями:* {premium_now:,.0f} ₽\n"
             f"🎯 *При выполнении плановых показателей:* {premium_plan:,.0f} ₽\n\n"
@@ -1023,7 +1027,6 @@ async def prem_calc(update, ctx):
             parse_mode="Markdown"
         )
     else:
-        # Закрытый месяц – только фактическая премия
         await q.message.reply_text(
             f"💰 *Твоя премия за {MN[sm]} {sy}:* {premium_now:,.0f} ₽\n\n"
             f"✨ Отличный результат! 👏",
@@ -1276,7 +1279,7 @@ async def router(update, ctx):
     else:
         await q.answer()
 
-# ====== WEB API SERVER ======
+# ====== WEB API SERVER (ИСПРАВЛЕНА ПОДДЕРЖКА USER ID) ======
 import hashlib, hmac, urllib.parse
 from aiohttp import web
 from aiohttp_middlewares import cors_middleware
@@ -1377,17 +1380,34 @@ async def handle_api_data(request):
         })
     try:
         body = await request.json()
-        init_data = body.get("initData", "")
-        if not verify_telegram_data(init_data, BOT_TOKEN):
-            return web.json_response({"error": "unauthorized"}, status=403,
+        init_data = body.get("initData")
+        user_id = body.get("userId")
+
+        # Определяем способ аутентификации
+        if init_data:
+            # Из Telegram Mini App
+            if not verify_telegram_data(init_data, BOT_TOKEN):
+                return web.json_response({"error": "unauthorized"}, status=403,
+                                         headers={"Access-Control-Allow-Origin": "*"})
+            user_id = extract_user_id(init_data)
+            if not user_id:
+                return web.json_response({"error": "no_user"}, status=400,
+                                         headers={"Access-Control-Allow-Origin": "*"})
+        elif user_id is not None:
+            # Из PWA/браузера – передали userId
+            # Проверяем, зарегистрирован ли пользователь
+            if not is_reg(int(user_id)):
+                return web.json_response({"error": "not_registered"}, status=403,
+                                         headers={"Access-Control-Allow-Origin": "*"})
+            user_id = int(user_id)
+        else:
+            return web.json_response({"error": "no_credentials"}, status=400,
                                      headers={"Access-Control-Allow-Origin": "*"})
-        user_id = extract_user_id(init_data)
-        if not user_id:
-            return web.json_response({"error": "no_user"}, status=400,
-                                     headers={"Access-Control-Allow-Origin": "*"})
+
         if is_banned(user_id):
             return web.json_response({"error": "banned"}, status=403,
                                      headers={"Access-Control-Allow-Origin": "*"})
+
         result = build_api_response(user_id)
         return web.json_response(result, headers={"Access-Control-Allow-Origin": "*"})
     except Exception as e:
@@ -1409,7 +1429,7 @@ async def start_api_server():
     await site.start()
     logging.info(f"API server started on port {API_PORT}")
 
-# ====== МЕНЮ КОМАНД (только общие команды, без админских) ======
+# ====== МЕНЮ КОМАНД ======
 async def post_init(app):
     from telegram import BotCommand
     commands = [
@@ -1503,7 +1523,7 @@ def main():
     asyncio.set_event_loop(loop)
     loop.run_until_complete(start_api_server())
 
-    print("🤖 Бот v3.8 (последняя рентабельность, обновлённые названия, права доступа) запущен!")
+    print("🤖 Бот v3.9 (поддержка userId, исправлена сводка) запущен!")
     print(f"🌐 API сервер: http://localhost:{API_PORT}/api/data")
     print(f"📱 WebApp URL: {WEBAPP_URL}")
     print("📋 Команды зарегистрированы в меню Telegram.")
