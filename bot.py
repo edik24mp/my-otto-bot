@@ -476,6 +476,25 @@ async def start(update, ctx):
         return ConversationHandler.END
     uid = update.effective_user.id
     now = datetime.now()
+    if update.message.text and update.message.text.startswith('/start login'):
+        # Пользователь перешёл по ссылке авторизации
+        # Если он уже зарегистрирован, просто открываем приложение
+        if is_reg(uid):
+            # Отправляем сообщение с кнопкой для открытия приложения
+            await update.message.reply_text(
+                "✅ Вы уже зарегистрированы!\nНажмите кнопку, чтобы открыть приложение:",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📱 Открыть приложение", web_app=WebAppInfo(url=WEBAPP_URL))]
+                ])
+            )
+            return ConversationHandler.END
+        else:
+            # Если не зарегистрирован – предлагаем зарегистрироваться
+            await update.message.reply_text(
+                "👋 Добро пожаловать!\nДавайте зарегистрируем вас.\n\nКак вас зовут?",
+                parse_mode="Markdown"
+            )
+            return REG_NAME
     if uid == ADMIN_USER_ID and not is_reg(uid):
         nm = update.effective_user.first_name or "Админ"
         reg_user(uid, nm, "director")
@@ -579,10 +598,10 @@ async def _freg(update, ctx):
         await msg.reply_text(f"✅ *{nm}!*\n\nРад, что ты заинтересован! 👍\nДавай делать деньги! 💰",
                              parse_mode="Markdown")
     elif pos == "founder":
-        await msg.reply_text(f"🙇 *{nm}*, честь! Только прирост за приростом! 🚀",
+        await msg.reply_text(f"🙇 *{nm}*, какая честь для нас, что Вы с нами ! Мы сделаем все возможное, чтобы на дашбордах Вы видели только прирост за приростом! 🚀",
                              parse_mode="Markdown")
     elif pos == "director":
-        await msg.reply_text("✅ Спасибо за интерес! 👏 Богатеем вместе! 💰",
+        await msg.reply_text("✅ Спасибо за твой интерес к показателям ! 👏 Давай разбогатеем вместе! 💰",
                              parse_mode="Markdown")
     else:
         await msg.reply_text(f"✅ {nm}!")
