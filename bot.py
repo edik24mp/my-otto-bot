@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v3.9 (поддержка userId в API, исправлена сводка)
-pip install "python-telegram-bot[job-queue]>=21.0" matplotlib numpy aiohttp supabase
+TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v4.0 (PWA-авторизация через токен)
 """
-import json, os, logging, asyncio, re
+
+import json, os, logging, asyncio, re, secrets
 from datetime import datetime, timedelta
 from calendar import monthrange
 from typing import Optional, Dict, List
@@ -30,6 +30,8 @@ SUPABASE_URL = "https://fqoigjvvtvayeobxzaui.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZxb2lnanZ2dHZheWVvYnh6YXVpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTI3NDM0NSwiZXhwIjoyMDk2ODUwMzQ1fQ.n_aESJHrD4ZEOdyyxOP1fpvAERSarpjYF-wJrfTnlOQ"
 
 WEBAPP_URL = "https://edik24mp.github.io/my-otto-frontend/"
+PWA_AUTH_URL = WEBAPP_URL.rstrip('/') + "/?token="   # для standalone PWA
+
 API_PORT = 8443
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO)
@@ -93,7 +95,39 @@ def ban_u(uid: int):
 def promote(uid: int):
     supabase.table("users").update({"is_admin": True}).eq("user_id", uid).execute()
 
-# ====== DATA (Supabase) ======
+# ====== НОВОЕ: СЕССИИ ДЛЯ PWA ======
+SESSION_EXPIRY_DAYS = 30
+
+def create_session(user_id: int) -> str:
+    """Создаёт токен, сохраняет в таблицу sessions, возвращает токен."""
+    token = secrets.token_hex(32)
+    now = datetime.now()
+    expires = now + timedelta(days=SESSION_EXPIRY_DAYS)
+    supabase.table("sessions").insert({
+        "user_id": user_id,
+        "token": token,
+        "created_at": now.isoformat(),
+        "expires_at": expires.isoformat()
+    }).execute()
+    return token
+
+def validate_token(token: str) -> Optional[int]:
+    """Проверяет токен: не истёк ли, возвращает user_id или None."""
+    res = supabase.table("sessions").select("*").eq("token", token).execute()
+    if not res.data:
+        return None
+    session = res.data[0]
+    expires = datetime.fromisoformat(session["expires_at"])
+    if expires < datetime.now():
+        # Удаляем истёкший токен
+        supabase.table("sessions").delete().eq("token", token).execute()
+        return None
+    # Продлеваем время жизни
+    new_expiry = datetime.now() + timedelta(days=SESSION_EXPIRY_DAYS)
+    supabase.table("sessions").update({"expires_at": new_expiry.isoformat()}).eq("token", token).execute()
+    return session["user_id"]
+
+# ====== DATA (Supabase) без изменений ======
 def get_year_plan(year: int) -> dict:
     res = supabase.table("year_plans").select("*").eq("year", year).execute()
     if res.data:
@@ -470,31 +504,39 @@ async def _adm(update):
 def _msg(update):
     return update.callback_query.message if update.callback_query else update.message
 
-# ====== /start ======
+# ====== /start (ОБНОВЛЁН) ======
 async def start(update, ctx):
     if not await _chk(update):
         return ConversationHandler.END
     uid = update.effective_user.id
     now = datetime.now()
+
+    # Обработка ссылки авторизации /start login
     if update.message.text and update.message.text.startswith('/start login'):
-        # Пользователь перешёл по ссылке авторизации
-        # Если он уже зарегистрирован, просто открываем приложение
         if is_reg(uid):
-            # Отправляем сообщение с кнопкой для открытия приложения
+            # Зарегистрирован → создаём токен для PWA
+            token = create_session(uid)
+            pwa_link = PWA_AUTH_URL + token
             await update.message.reply_text(
-                "✅ Вы уже зарегистрированы!\nНажмите кнопку, чтобы открыть приложение:",
+                "✅ Вы вошли!\n\n"
+                "📱 Чтобы открыть приложение на рабочем столе, перейдите по ссылке:\n"
+                f"{pwa_link}\n\n"
+                "Или откройте мини-приложение прямо в Telegram:",
+                disable_web_page_preview=True,
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📱 Открыть приложение", web_app=WebAppInfo(url=WEBAPP_URL))]
+                    [InlineKeyboardButton("📱 Открыть в Telegram", web_app=WebAppInfo(url=WEBAPP_URL))]
                 ])
             )
             return ConversationHandler.END
         else:
-            # Если не зарегистрирован – предлагаем зарегистрироваться
+            # Незарегистрированный → ведём на регистрацию
             await update.message.reply_text(
                 "👋 Добро пожаловать!\nДавайте зарегистрируем вас.\n\nКак вас зовут?",
                 parse_mode="Markdown"
             )
             return REG_NAME
+
+    # Остальная логика start без изменений
     if uid == ADMIN_USER_ID and not is_reg(uid):
         nm = update.effective_user.first_name or "Админ"
         reg_user(uid, nm, "director")
@@ -545,7 +587,7 @@ async def start(update, ctx):
             [InlineKeyboardButton("🕐 История", callback_data="history"), InlineKeyboardButton("✏️ Ретро", callback_data="retro")],
             [InlineKeyboardButton("👥 Управление", callback_data="manage")]
         ]
-        if WEBAPP_URL and WEBAPP_URL != "ВСТАВЬТЕ_URL_ВАШЕГО_WEBAPP":
+        if WEBAPP_URL:
             kb.append([InlineKeyboardButton("📱 Открыть приложение", web_app=WebAppInfo(url=WEBAPP_URL))])
         await update.message.reply_text(
             f"🔥 *Привет, {dn_}!* 👑\n📅 {now.strftime('%d.%m.%Y')}{ht}\n\nВыбери:",
@@ -559,7 +601,7 @@ async def start(update, ctx):
         ]
         if u and u.get("position") == "manager":
             kb.append([InlineKeyboardButton("💰 Моя премия", callback_data="my_premium")])
-        if WEBAPP_URL and WEBAPP_URL != "ВСТАВЬТЕ_URL_ВАШЕГО_WEBAPP":
+        if WEBAPP_URL:
             kb.append([InlineKeyboardButton("📱 Открыть приложение", web_app=WebAppInfo(url=WEBAPP_URL))])
         await update.message.reply_text(
             f"👋 *{dn_}!*\n📅 {now.strftime('%d.%m.%Y')}\n\nВыбери:",
@@ -567,7 +609,7 @@ async def start(update, ctx):
         )
     return ConversationHandler.END
 
-# ====== РЕГИСТРАЦИЯ ======
+# ====== РЕГИСТРАЦИЯ (без изменений) ======
 async def reg_name(update, ctx):
     ctx.user_data["rn"] = update.message.text.strip()
     kb = [[InlineKeyboardButton(v, callback_data=f"pos_{k}")] for k, v in POS.items()]
@@ -942,7 +984,6 @@ async def summary_m(update, ctx):
     n = int(t["pctp"] // 5)
     bar = "█" * min(n, 20) + "░" * max(20 - n, 0)
 
-    # Формируем строку отставания/перевыполнения
     if t['behind']:
         lag_text = f"❗ Отставание: {abs(t['lag']):,.0f} ₽"
     else:
@@ -1298,7 +1339,7 @@ async def router(update, ctx):
     else:
         await q.answer()
 
-# ====== WEB API SERVER (ИСПРАВЛЕНА ПОДДЕРЖКА USER ID) ======
+# ====== WEB API SERVER (ОБНОВЛЁН ДЛЯ TOKEN) ======
 import hashlib, hmac, urllib.parse
 from aiohttp import web
 from aiohttp_middlewares import cors_middleware
@@ -1395,16 +1436,16 @@ async def handle_api_data(request):
         return web.Response(headers={
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
         })
     try:
         body = await request.json()
         init_data = body.get("initData")
-        user_id = body.get("userId")
+        token = body.get("token")          # <-- теперь токен вместо userId
+        user_id = None
 
-        # Определяем способ аутентификации
         if init_data:
-            # Из Telegram Mini App
+            # Старый способ: Telegram Mini App
             if not verify_telegram_data(init_data, BOT_TOKEN):
                 return web.json_response({"error": "unauthorized"}, status=403,
                                          headers={"Access-Control-Allow-Origin": "*"})
@@ -1412,19 +1453,21 @@ async def handle_api_data(request):
             if not user_id:
                 return web.json_response({"error": "no_user"}, status=400,
                                          headers={"Access-Control-Allow-Origin": "*"})
-        elif user_id is not None:
-            # Из PWA/браузера – передали userId
-            # Проверяем, зарегистрирован ли пользователь
-            if not is_reg(int(user_id)):
-                return web.json_response({"error": "not_registered"}, status=403,
+        elif token:
+            # Новый способ: PWA по токену
+            user_id = validate_token(token)
+            if not user_id:
+                return web.json_response({"error": "invalid_token"}, status=401,
                                          headers={"Access-Control-Allow-Origin": "*"})
-            user_id = int(user_id)
         else:
             return web.json_response({"error": "no_credentials"}, status=400,
                                      headers={"Access-Control-Allow-Origin": "*"})
 
         if is_banned(user_id):
             return web.json_response({"error": "banned"}, status=403,
+                                     headers={"Access-Control-Allow-Origin": "*"})
+        if not is_reg(user_id):
+            return web.json_response({"error": "not_registered"}, status=403,
                                      headers={"Access-Control-Allow-Origin": "*"})
 
         result = build_api_response(user_id)
@@ -1542,7 +1585,7 @@ def main():
     asyncio.set_event_loop(loop)
     loop.run_until_complete(start_api_server())
 
-    print("🤖 Бот v3.9 (поддержка userId, исправлена сводка) запущен!")
+    print("🤖 Бот v4.0 (PWA-авторизация) запущен!")
     print(f"🌐 API сервер: http://localhost:{API_PORT}/api/data")
     print(f"📱 WebApp URL: {WEBAPP_URL}")
     print("📋 Команды зарегистрированы в меню Telegram.")
