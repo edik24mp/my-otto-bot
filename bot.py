@@ -5,7 +5,7 @@ TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v4.0 (PWA-авториз
 """
 
 import json, os, logging, asyncio, re, secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from calendar import monthrange
 from typing import Optional, Dict, List
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, MenuButtonWebApp
@@ -101,7 +101,7 @@ SESSION_EXPIRY_DAYS = 30
 def create_session(user_id: int) -> str:
     """Создаёт токен, сохраняет в таблицу sessions, возвращает токен."""
     token = secrets.token_hex(32)
-    now = datetime.now()
+    now = datetime.now(timezone.utc)          # ← aware datetime
     expires = now + timedelta(days=SESSION_EXPIRY_DAYS)
     supabase.table("sessions").insert({
         "user_id": user_id,
@@ -117,13 +117,16 @@ def validate_token(token: str) -> Optional[int]:
     if not res.data:
         return None
     session = res.data[0]
-    expires = datetime.fromisoformat(session["expires_at"])
-    if expires < datetime.now():
+    expires_str = session["expires_at"]
+    # Парсим строку в aware datetime (Supabase возвращает с timezone)
+    expires = datetime.fromisoformat(expires_str)
+    now = datetime.now(timezone.utc)
+    if expires < now:
         # Удаляем истёкший токен
         supabase.table("sessions").delete().eq("token", token).execute()
         return None
     # Продлеваем время жизни
-    new_expiry = datetime.now() + timedelta(days=SESSION_EXPIRY_DAYS)
+    new_expiry = now + timedelta(days=SESSION_EXPIRY_DAYS)
     supabase.table("sessions").update({"expires_at": new_expiry.isoformat()}).eq("token", token).execute()
     return session["user_id"]
 
