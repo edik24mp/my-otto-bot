@@ -29,7 +29,7 @@ PREMIUM_START_MONTH = 9
 SUPABASE_URL = "https://fqoigjvvtvayeobxzaui.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZxb2lnanZ2dHZheWVvYnh6YXVpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTI3NDM0NSwiZXhwIjoyMDk2ODUwMzQ1fQ.n_aESJHrD4ZEOdyyxOP1fpvAERSarpjYF-wJrfTnlOQ"
 
-WEBAPP_URL = "https://edik24mp.github.io/my-otto-frontend/"
+WEBAPP_URL = "https://edik24mp.github.io/otto-app-new/"
 PWA_AUTH_URL = WEBAPP_URL.rstrip('/') + "/?token="   # для standalone PWA
 
 API_PORT = 8443
