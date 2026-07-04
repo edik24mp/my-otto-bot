@@ -332,7 +332,6 @@ async def e_nprof(update, ctx):
         return EXT_NPROF
 
 async def e_rprof(update, ctx):
-    """Сохраняет рентабельность постоянных, запрашивает общую."""
     required = ["enp", "erp", "enc", "ercr", "ercf", "enpr"]
     missing = [k for k in required if k not in ctx.user_data]
     if missing:
@@ -348,6 +347,10 @@ async def e_rprof(update, ctx):
     except:
         await update.message.reply_text("❌ Введите рентабельность числом (например, 18.5)")
         return EXT_RPROF
+
+    ctx.user_data["erpr"] = v
+    await update.message.reply_text("📊 *Общая рентабельность* (%):", parse_mode="Markdown")
+    return EXT_TPROF   # ← переключаемся на новый шаг
 
     ctx.user_data["erpr"] = v
     await update.message.reply_text("📊 *Общая рентабельность* (%):", parse_mode="Markdown")
