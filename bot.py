@@ -179,11 +179,19 @@ def get_extended_report(year: int, month: int) -> dict | None:
     return res.data[0]["data"] if res.data else None
 
 def set_extended_report(year: int, month: int, data: dict):
-    supabase.table("extended_reports").upsert({
-        "year": year,
-        "month": month,
-        "data": data
-    }, on_conflict=["year", "month"]).execute()
+    existing = supabase.table("extended_reports").select("id").eq("year", year).eq("month", month).execute()
+    if existing.data:
+        supabase.table("extended_reports").update({
+            "year": year,
+            "month": month,
+            "data": data
+        }).eq("year", year).eq("month", month).execute()
+    else:
+        supabase.table("extended_reports").insert({
+            "year": year,
+            "month": month,
+            "data": data
+        }).execute()
 
 def get_all_years() -> List[int]:
     res = supabase.table("year_plans").select("year").execute()
