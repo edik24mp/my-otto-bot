@@ -179,14 +179,25 @@ def get_extended_report(year: int, month: int) -> dict | None:
     return res.data[0]["data"] if res.data else None
 
 def set_extended_report(year: int, month: int, data: dict):
-    # Удаляем существующую запись, если она есть
+    # Пытаемся удалить старую запись (если она есть)
     supabase.table("extended_reports").delete().eq("year", year).eq("month", month).execute()
-    # Вставляем новую запись
-    supabase.table("extended_reports").insert({
-        "year": year,
-        "month": month,
-        "data": data
-    }).execute()
+    # Проверяем, осталась ли запись (вдруг удаление не сработало)
+    existing = supabase.table("extended_reports").select("id").eq("year", year).eq("month", month).execute()
+    if existing.data:
+        # Запись всё ещё существует – обновляем её по id
+        row_id = existing.data[0]["id"]
+        supabase.table("extended_reports").update({
+            "year": year,
+            "month": month,
+            "data": data
+        }).eq("id", row_id).execute()
+    else:
+        # Записи нет – можно смело вставлять
+        supabase.table("extended_reports").insert({
+            "year": year,
+            "month": month,
+            "data": data
+        }).execute()
 
 def get_all_years() -> List[int]:
     res = supabase.table("year_plans").select("year").execute()
