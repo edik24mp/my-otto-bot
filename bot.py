@@ -352,10 +352,6 @@ async def e_rprof(update, ctx):
     await update.message.reply_text("📊 *Общая рентабельность* (%):", parse_mode="Markdown")
     return EXT_TPROF   # ← переключаемся на новый шаг
 
-    ctx.user_data["erpr"] = v
-    await update.message.reply_text("📊 *Общая рентабельность* (%):", parse_mode="Markdown")
-    return EXT_TPROF
-
 async def e_tprof(update, ctx):
     """Получает общую рентабельность и сохраняет весь расширенный отчёт."""
     required = ["enp", "erp", "enc", "ercr", "ercf", "enpr", "erpr"]
