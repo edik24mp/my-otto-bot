@@ -179,12 +179,11 @@ def get_extended_report(year: int, month: int) -> dict | None:
     return res.data[0]["data"] if res.data else None
 
 def set_extended_report(year: int, month: int, data: dict):
-    """Сохраняет или обновляет расширенный отчёт (перезаписывает при совпадении года и месяца)."""
     supabase.table("extended_reports").upsert({
         "year": year,
         "month": month,
         "data": data
-    }, on_conflict="year,month").execute()
+    }, on_conflict=["year", "month"]).execute()
 
 def get_all_years() -> List[int]:
     res = supabase.table("year_plans").select("year").execute()
