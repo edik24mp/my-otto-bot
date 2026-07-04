@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v4.0 (PWA-авторизация через токен)
+TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v4.1 (закрытие месяца + ретро-сводка)
 """
 
 import json, os, logging, asyncio, re, secrets
@@ -95,13 +95,12 @@ def ban_u(uid: int):
 def promote(uid: int):
     supabase.table("users").update({"is_admin": True}).eq("user_id", uid).execute()
 
-# ====== НОВОЕ: СЕССИИ ДЛЯ PWA ======
+# ====== СЕССИИ ДЛЯ PWA ======
 SESSION_EXPIRY_DAYS = 30
 
 def create_session(user_id: int) -> str:
-    """Создаёт токен, сохраняет в таблицу sessions, возвращает токен."""
     token = secrets.token_hex(32)
-    now = datetime.now(timezone.utc)          # ← aware datetime
+    now = datetime.now(timezone.utc)
     expires = now + timedelta(days=SESSION_EXPIRY_DAYS)
     supabase.table("sessions").insert({
         "user_id": user_id,
@@ -112,25 +111,20 @@ def create_session(user_id: int) -> str:
     return token
 
 def validate_token(token: str) -> Optional[int]:
-    """Проверяет токен: не истёк ли, возвращает user_id или None."""
     res = supabase.table("sessions").select("*").eq("token", token).execute()
     if not res.data:
         return None
     session = res.data[0]
-    expires_str = session["expires_at"]
-    # Парсим строку в aware datetime (Supabase возвращает с timezone)
-    expires = datetime.fromisoformat(expires_str)
+    expires = datetime.fromisoformat(session["expires_at"])
     now = datetime.now(timezone.utc)
     if expires < now:
-        # Удаляем истёкший токен
         supabase.table("sessions").delete().eq("token", token).execute()
         return None
-    # Продлеваем время жизни
     new_expiry = now + timedelta(days=SESSION_EXPIRY_DAYS)
     supabase.table("sessions").update({"expires_at": new_expiry.isoformat()}).eq("token", token).execute()
     return session["user_id"]
 
-# ====== DATA (Supabase) без изменений ======
+# ====== DATA (Supabase) ======
 def get_year_plan(year: int) -> dict:
     res = supabase.table("year_plans").select("*").eq("year", year).execute()
     if res.data:
@@ -246,7 +240,6 @@ def mtotals(md, y, m, ref=None):
     df = daily_from_cum(md, y, m)
     fp = rp if rp is not None else sum(v["payments"] for v in df.values())
 
-    # Рентабельность – последняя внесённая
     ents = md.get("cumulative_entries", [])
     if ents:
         last_entry = sorted(ents, key=lambda x: x["date"])[-1]
@@ -256,14 +249,12 @@ def mtotals(md, y, m, ref=None):
     else:
         fpr = 0
 
-    # План на сегодня
     if elapsed > 0:
         plan_today = (pp / td) * elapsed
     else:
         plan_today = 0
     pct_today = (fp / plan_today * 100) if plan_today > 0 else 0
 
-    # Отставание/опережение
     ideal = (pp / td) * elapsed if td else 0
     lag = ideal - fp
 
@@ -514,10 +505,8 @@ async def start(update, ctx):
     uid = update.effective_user.id
     now = datetime.now()
 
-    # Обработка ссылки авторизации /start login
     if update.message.text and update.message.text.startswith('/start login'):
         if is_reg(uid):
-            # Зарегистрирован → создаём токен для PWA
             token = create_session(uid)
             pwa_link = PWA_AUTH_URL + token
             await update.message.reply_text(
@@ -532,14 +521,12 @@ async def start(update, ctx):
             )
             return ConversationHandler.END
         else:
-            # Незарегистрированный → ведём на регистрацию
             await update.message.reply_text(
                 "👋 Добро пожаловать!\nДавайте зарегистрируем вас.\n\nКак вас зовут?",
                 parse_mode="Markdown"
             )
             return REG_NAME
 
-    # Остальная логика start без изменений
     if uid == ADMIN_USER_ID and not is_reg(uid):
         nm = update.effective_user.first_name or "Админ"
         reg_user(uid, nm, "director")
@@ -750,15 +737,31 @@ async def yplan_prof(update, ctx):
         await update.message.reply_text("❌ Введите рентабельность (например, 20)")
         return SET_YPLAN_PROF
 
-# ====== ФАКТ ======
+# ====== ФАКТ (ИЗМЕНЁН) ======
 async def fact_s(update, ctx):
     if not await _adm(update):
         return ConversationHandler.END
     now = datetime.now()
     md = get_month_data(now.year, now.month)
     if md["plan_payments"] == 0:
-        await _msg(update).reply_text("⚠️ Сначала /set_plan")
-        return ConversationHandler.END
+        # Проверим предыдущий месяц
+        prev_month = now.month - 1 if now.month > 1 else 12
+        prev_year = now.year if now.month > 1 else now.year - 1
+        prev_md = get_month_data(prev_year, prev_month)
+        if prev_md["plan_payments"] > 0:
+            await _msg(update).reply_text(
+                f"⚠️ План на {MN[now.month]} ещё не установлен.\n"
+                f"Но {MN[prev_month]} {prev_year} не закрыт. Давайте закроем его?\n\n"
+                f"Введите НАКОПИТЕЛЬНУЮ сумму оплат за 1–{days_in(prev_year, prev_month)} {MN[prev_month]}:",
+                parse_mode="Markdown"
+            )
+            ctx.user_data["fy"], ctx.user_data["fm"] = prev_year, prev_month
+            ctx.user_data["fd"] = f"{prev_year}-{prev_month:02d}-{days_in(prev_year, prev_month)}"
+            return SET_FACT_CUM
+        else:
+            await _msg(update).reply_text(f"⚠️ Сначала установите план на {MN[now.month]} через /set_plan")
+            return ConversationHandler.END
+
     ents = md.get("cumulative_entries", [])
     lc = ents[-1]["cumulative_payments"] if ents else 0
     ld_ = ents[-1]["date"] if ents else "—"
@@ -800,19 +803,38 @@ async def fact_prof(update, ctx):
         t = mtotals(md, ctx.user_data["fy"], ctx.user_data["fm"])
         li = "❗" if t["behind"] else "🚀"
         lw = "Отставание" if t["behind"] else "Опережение"
-        await update.message.reply_text(
+
+        base_msg = (
             f"✅ *Сохранено!*\n\n💰 {t['fp']:,.0f}/{t['pp']:,.0f} ₽ ({t['pctp']:.1f}%)\n"
             f"{li} {lw}: {abs(t['lag']):,.0f} ₽\n⚡ Нужно/день: {t['dn']:,.0f} ₽\n"
-            f"📈 Рент: {t['fpr']:.1f}%/{t['ppr']:.1f}%\n📅 Ост: {t['remaining']} дн.",
-            parse_mode="Markdown"
+            f"📈 Рент: {t['fpr']:.1f}%/{t['ppr']:.1f}%\n📅 Ост: {t['remaining']} дн."
         )
+        await update.message.reply_text(base_msg, parse_mode="Markdown")
+
+        # Если введён последний день месяца – итоговая сводка
+        y, m = ctx.user_data["fy"], ctx.user_data["fm"]
+        if int(ctx.user_data["fd"].split("-")[2]) == days_in(y, m):
+            status_emoji = "🎉" if t["ahead"] else ("❗" if t["behind"] else "📊")
+            status_text = (
+                "План перевыполнен! Отличная работа!" if t["ahead"]
+                else "План недовыполнен. В следующем месяце поднажмите." if t["behind"]
+                else "План выполнен в точку."
+            )
+            await update.message.reply_text(
+                f"{status_emoji} *{MN[m]} {y} завершён!*\n\n"
+                f"💰 Оплаты: {t['fp']:,.0f} / {t['pp']:,.0f} ₽ ({t['pctp']:.1f}%)\n"
+                f"📈 Рентабельность: {t['fpr']:.1f}% / {t['ppr']:.1f}%\n\n"
+                f"{status_text}\n\n"
+                f"Чтобы начать новый месяц, установите план: /set_plan",
+                parse_mode="Markdown"
+            )
         return ConversationHandler.END
     except Exception as e:
         logging.error(f"fact_prof error: {e}")
         await update.message.reply_text("❌ Ошибка, попробуйте ещё раз")
         return SET_FACT_PROF
 
-# ====== РЕТРО-ВВОД ======
+# ====== РЕТРО-ВВОД (ИЗМЕНЁН) ======
 async def retro_s(update, ctx):
     if not await _adm(update):
         return ConversationHandler.END
@@ -898,16 +920,35 @@ async def retro_val(update, ctx):
             md["result_profitability_pct"] = _extract_number(parts[3])
 
         set_month_data(y, m, md)
-        pp = md.get("plan_payments", 0)
-        ppr = md.get("plan_profitability_pct", 0)
-        rp = md.get("result_payments")
-        rpr = md.get("result_profitability_pct")
-        await update.message.reply_text(
-            f"✅ *{MN[m]} {y} — сохранено!*\n\n"
-            f"План: {pp:,.0f} ₽ / {ppr:.1f}%\n"
-            f"Факт: {'—' if rp is None else f'{rp:,.0f} ₽'} / {'—' if rpr is None else f'{rpr:.1f}%'}",
-            parse_mode="Markdown"
-        )
+
+        # Если редактировали фактические данные – показываем сводку
+        if f in ("fact_pay", "fact_prof", "all"):
+            t = mtotals(md, y, m)
+            status_emoji = "🎉" if t["ahead"] else ("❗" if t["behind"] else "📊")
+            status_text = (
+                "План перевыполнен! Отличная работа!" if t["ahead"]
+                else "План недовыполнен. В следующем месяце поднажмите." if t["behind"]
+                else "План выполнен в точку."
+            )
+            await update.message.reply_text(
+                f"{status_emoji} *Итог за {MN[m]} {y}*\n\n"
+                f"💰 Оплаты: {t['fp']:,.0f} / {t['pp']:,.0f} ₽ ({t['pctp']:.1f}%)\n"
+                f"📈 Рентабельность: {t['fpr']:.1f}% / {t['ppr']:.1f}%\n\n"
+                f"{status_text}",
+                parse_mode="Markdown"
+            )
+        else:
+            # Если меняли только план – просто показываем сохранённые цифры
+            pp = md.get("plan_payments", 0)
+            ppr = md.get("plan_profitability_pct", 0)
+            rp = md.get("result_payments")
+            rpr = md.get("result_profitability_pct")
+            await update.message.reply_text(
+                f"✅ *{MN[m]} {y} — сохранено!*\n\n"
+                f"План: {pp:,.0f} ₽ / {ppr:.1f}%\n"
+                f"Факт: {'—' if rp is None else f'{rp:,.0f} ₽'} / {'—' if rpr is None else f'{rpr:.1f}%'}",
+                parse_mode="Markdown"
+            )
         return ConversationHandler.END
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}\nПопробуйте ещё раз (например, 5000000)")
@@ -969,7 +1010,7 @@ async def multi_y(update, ctx):
     img = gen_multi_year(data, years)
     await msg.reply_photo(photo=img, caption="📉 Динамика по годам")
 
-# ====== СВОДКА (исправлена) ======
+# ====== СВОДКА ======
 async def summary_m(update, ctx):
     if not await _chk(update):
         return
@@ -1342,7 +1383,7 @@ async def router(update, ctx):
     else:
         await q.answer()
 
-# ====== WEB API SERVER (ОБНОВЛЁН ДЛЯ TOKEN) ======
+# ====== WEB API SERVER ======
 import hashlib, hmac, urllib.parse
 from aiohttp import web
 from aiohttp_middlewares import cors_middleware
@@ -1444,11 +1485,10 @@ async def handle_api_data(request):
     try:
         body = await request.json()
         init_data = body.get("initData")
-        token = body.get("token")          # <-- теперь токен вместо userId
+        token = body.get("token")
         user_id = None
 
         if init_data:
-            # Старый способ: Telegram Mini App
             if not verify_telegram_data(init_data, BOT_TOKEN):
                 return web.json_response({"error": "unauthorized"}, status=403,
                                          headers={"Access-Control-Allow-Origin": "*"})
@@ -1457,7 +1497,6 @@ async def handle_api_data(request):
                 return web.json_response({"error": "no_user"}, status=400,
                                          headers={"Access-Control-Allow-Origin": "*"})
         elif token:
-            # Новый способ: PWA по токену
             user_id = validate_token(token)
             if not user_id:
                 return web.json_response({"error": "invalid_token"}, status=401,
@@ -1588,7 +1627,7 @@ def main():
     asyncio.set_event_loop(loop)
     loop.run_until_complete(start_api_server())
 
-    print("🤖 Бот v4.0 (PWA-авторизация) запущен!")
+    print("🤖 Бот v4.1 (закрытие месяца + ретро-сводка) запущен!")
     print(f"🌐 API сервер: http://localhost:{API_PORT}/api/data")
     print(f"📱 WebApp URL: {WEBAPP_URL}")
     print("📋 Команды зарегистрированы в меню Telegram.")
