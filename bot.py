@@ -349,6 +349,7 @@ async def e_rprof(update, ctx):
         return EXT_RPROF
 
     ctx.user_data["erpr"] = v
+    logging.info(f"DEBUG: Сохранена рентабельность постоянных: {v}, переходим к общей")
     await update.message.reply_text("📊 *Общая рентабельность* (%):", parse_mode="Markdown")
     return EXT_TPROF   # ← переключаемся на новый шаг
 
