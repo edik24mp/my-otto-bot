@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v4.1 (закрытие месяца + ретро-сводка)
+TELEGRAM BOT - КОНТРОЛЬ ПЛАНА ПРОДАЖ v4.2 (сотые, дата факта, расширенный отчёт)
 """
 
 import json, os, logging, asyncio, re, secrets
@@ -329,7 +329,7 @@ def gen_month_dash(md, t):
     ax1.barh(0.5, 100, 0.7, color="#E5E7EB", alpha=0.8, zorder=1)
     icon = "🚀" if t["ahead"] else ("❗" if t["behind"] else "💰")
     ax1.text(0,1.8, f'{icon} ОПЛАТЫ', fontsize=18, fontweight="bold", color=T, transform=ax1.transAxes)
-    ax1.text(1,1.8, f'{t["fp"]:,.0f} / {t["pp"]:,.0f} ₽  ({t["pctp"]:.1f}%)', fontsize=16, color=bc, ha="right", fontweight="bold", transform=ax1.transAxes)
+    ax1.text(1,1.8, f'{t["fp"]:,.0f} / {t["pp"]:,.0f} ₽  ({t["pctp"]:.2f}%)', fontsize=16, color=bc, ha="right", fontweight="bold", transform=ax1.transAxes)
 
     ax2 = fig.add_axes([0.06,0.78,0.88,0.04], facecolor=CB)
     ax2.set_xlim(0,100); ax2.set_ylim(0,1); ax2.set_xticks([]); ax2.set_yticks([])
@@ -340,14 +340,14 @@ def gen_month_dash(md, t):
     ax2.barh(0.5, 100, 0.7, color="#E5E7EB", alpha=0.8, zorder=1)
     ic2 = "🚀" if t["lagpr"]<=0 else "❗"
     ax2.text(0,1.8, f'{ic2} РЕНТАБЕЛЬНОСТЬ', fontsize=18, fontweight="bold", color=T, transform=ax2.transAxes)
-    ax2.text(1,1.8, f'{t["fpr"]:.1f}% / {t["ppr"]:.1f}% ({t["pctpr"]:.1f}%)', fontsize=16, color=pc2, ha="right", fontweight="bold", transform=ax2.transAxes)
+    ax2.text(1,1.8, f'{t["fpr"]:.2f}% / {t["ppr"]:.2f}% ({t["pctpr"]:.2f}%)', fontsize=16, color=pc2, ha="right", fontweight="bold", transform=ax2.transAxes)
 
     y0 = 0.72
     lagc = RD if t["behind"] else GR
     lagpc = RD if t["lagpr"]>0 else GR
     mets = [
         (f'{"❗" if t["behind"] else "🚀"} Отставание:', f'{abs(t["lag"]):,.0f} ₽', lagc),
-        (f'{"❗" if t["lagpr"]>0 else "🚀"} Откл. рентаб.:', f'{t["lagpr"]:+.1f} п.п.', lagpc),
+        (f'{"❗" if t["lagpr"]>0 else "🚀"} Откл. рентаб.:', f'{t["lagpr"]:+.2f} п.п.', lagpc),
         ("⚡ Нужно в день:", f'{t["dn"]:,.0f} ₽', OR),
         ("📅 День:", f'{t["elapsed"]} из {t["td"]} (ост. {t["remaining"]})', CY),
         ("📊 Норма/день:", f'{t["avgd"]:,.0f} ₽', TS),
@@ -399,7 +399,7 @@ def gen_year_dash(yd, yt):
     BG, CB, T, TS = "#FFFFFF", "#F8F9FA", "#212529", "#6C757D"
     GR, RD, OR, GD = "#22c55e", "#ef4444", "#FFA500", "#FFD700"
     fig.text(0.5,0.97, f'Год {yt["y"]}', ha="center", fontsize=28, fontweight="bold", color=T)
-    fig.text(0.5,0.94, f'{yt["fp"]:,.0f} / {yt["ypp"]:,.0f} ₽ ({yt["pctp"]:.1f}%)', ha="center", fontsize=16, color=OR)
+    fig.text(0.5,0.94, f'{yt["fp"]:,.0f} / {yt["ypp"]:,.0f} ₽ ({yt["pctp"]:.2f}%)', ha="center", fontsize=16, color=OR)
     mr = yt.get("mr", [])
     if mr:
         ax = fig.add_axes([0.08,0.45,0.86,0.42], facecolor=CB)
@@ -422,7 +422,7 @@ def gen_year_dash(yd, yt):
         profs = [r["prof"] for r in mr]
         cols = [GR if p >= yt["ypr"] else RD for p in profs]
         ax2.bar(range(len(ms)), profs, color=cols, alpha=0.8)
-        ax2.axhline(yt["ypr"], color=GD, lw=2, ls="--", label=f'План {yt["ypr"]:.0f}%')
+        ax2.axhline(yt["ypr"], color=GD, lw=2, ls="--", label=f'План {yt["ypr"]:.2f}%')
         ax2.set_xticks(range(len(ms)))
         ax2.set_xticklabels([MN[m][:3] for m in ms], fontsize=11)
         ax2.legend(fontsize=11, facecolor="white", edgecolor="#E5E7EB", labelcolor=T)
@@ -652,7 +652,9 @@ async def set_plan_s(update, ctx):
     return SET_PLAN_PAY
 
 def _extract_number(text: str) -> float:
-    cleaned = re.sub(r'[^0-9.,-]', '', text.replace(',', '.'))
+    # Удаляем знак процента и пробелы, затем очищаем
+    text = text.replace('%', '').replace(',', '.').strip()
+    cleaned = re.sub(r'[^0-9.,-]', '', text)
     if not cleaned:
         raise ValueError("No number found")
     return float(cleaned)
@@ -683,13 +685,13 @@ async def plan_prof(update, ctx):
         td = days_in(ctx.user_data["py"], ctx.user_data["pm"])
         dp = ctx.user_data["pp"] / td if td else 0
         await update.message.reply_text(
-            f"✅ *План!*\n💰 {ctx.user_data['pp']:,.0f} ₽\n📈 {v:.1f}%\n📅 Дней: {td}\n📊 Норма: {dp:,.0f} ₽/день",
+            f"✅ *План!*\n💰 {ctx.user_data['pp']:,.0f} ₽\n📈 {v:.2f}%\n📅 Дней: {td}\n📊 Норма: {dp:,.0f} ₽/день",
             parse_mode="Markdown"
         )
         return ConversationHandler.END
     except Exception as e:
         logging.error(f"plan_prof error: {e}, raw text: {repr(update.message.text)}")
-        await update.message.reply_text("❌ Введите рентабельность (например, 20)")
+        await update.message.reply_text("❌ Введите рентабельность (например, 20.5)")
         return SET_PLAN_PROF
 
 # ====== ГОДОВОЙ ПЛАН ======
@@ -729,12 +731,12 @@ async def yplan_prof(update, ctx):
         v = _extract_number(update.message.text)
         set_year_plan(ctx.user_data["ypy"], ctx.user_data["ypp"], v)
         await update.message.reply_text(
-            f"✅ *Год {ctx.user_data['ypy']}*\n💰 {ctx.user_data['ypp']:,.0f} ₽\n📈 {v:.1f}%",
+            f"✅ *Год {ctx.user_data['ypy']}*\n💰 {ctx.user_data['ypp']:,.0f} ₽\n📈 {v:.2f}%",
             parse_mode="Markdown"
         )
         return ConversationHandler.END
     except:
-        await update.message.reply_text("❌ Введите рентабельность (например, 20)")
+        await update.message.reply_text("❌ Введите рентабельность (например, 20.5)")
         return SET_YPLAN_PROF
 
 # ====== ФАКТ (ИЗМЕНЁН) ======
@@ -765,14 +767,16 @@ async def fact_s(update, ctx):
     ents = md.get("cumulative_entries", [])
     lc = ents[-1]["cumulative_payments"] if ents else 0
     ld_ = ents[-1]["date"] if ents else "—"
-    ctx.user_data["fd"] = now.strftime("%Y-%m-%d")
+    # Дата факта = последний завершённый день
+    last_reported_day = now.day - 1
+    ctx.user_data["fd"] = f"{now.year}-{now.month:02d}-{last_reported_day:02d}"
     ctx.user_data["fy"], ctx.user_data["fm"] = now.year, now.month
     msg = _msg(update)
     if update.callback_query:
         await update.callback_query.answer()
     await msg.reply_text(
-        f"📝 *Факт*\n📅 {now.strftime('%d.%m.%Y')}\nПосл: {lc:,.0f} ₽ ({ld_})\n\n"
-        f"НАКОПИТЕЛЬНАЯ сумма с 1 по {now.day-1} {MN[now.month][:3]}:",
+        f"📝 *Факт*\n📅 Данные по состоянию на {last_reported_day} {MN[now.month]}\nПосл: {lc:,.0f} ₽ ({ld_})\n\n"
+        f"НАКОПИТЕЛЬНАЯ сумма за 1–{last_reported_day} {MN[now.month][:3]}:",
         parse_mode="Markdown"
     )
     return SET_FACT_CUM
@@ -805,9 +809,9 @@ async def fact_prof(update, ctx):
         lw = "Отставание" if t["behind"] else "Опережение"
 
         base_msg = (
-            f"✅ *Сохранено!*\n\n💰 {t['fp']:,.0f}/{t['pp']:,.0f} ₽ ({t['pctp']:.1f}%)\n"
+            f"✅ *Сохранено!*\n\n💰 {t['fp']:,.0f}/{t['pp']:,.0f} ₽ ({t['pctp']:.2f}%)\n"
             f"{li} {lw}: {abs(t['lag']):,.0f} ₽\n⚡ Нужно/день: {t['dn']:,.0f} ₽\n"
-            f"📈 Рент: {t['fpr']:.1f}%/{t['ppr']:.1f}%\n📅 Ост: {t['remaining']} дн."
+            f"📈 Рент: {t['fpr']:.2f}%/{t['ppr']:.2f}%\n📅 Ост: {t['remaining']} дн."
         )
         await update.message.reply_text(base_msg, parse_mode="Markdown")
 
@@ -822,8 +826,8 @@ async def fact_prof(update, ctx):
             )
             await update.message.reply_text(
                 f"{status_emoji} *{MN[m]} {y} завершён!*\n\n"
-                f"💰 Оплаты: {t['fp']:,.0f} / {t['pp']:,.0f} ₽ ({t['pctp']:.1f}%)\n"
-                f"📈 Рентабельность: {t['fpr']:.1f}% / {t['ppr']:.1f}%\n\n"
+                f"💰 Оплаты: {t['fp']:,.0f} / {t['pp']:,.0f} ₽ ({t['pctp']:.2f}%)\n"
+                f"📈 Рентабельность: {t['fpr']:.2f}% / {t['ppr']:.2f}%\n\n"
                 f"{status_text}\n\n"
                 f"Чтобы начать новый месяц, установите план: /set_plan",
                 parse_mode="Markdown"
@@ -872,7 +876,7 @@ async def retro_month(update, ctx):
     ppr = md.get("plan_profitability_pct", 0)
     rp = md.get("result_payments")
     rpr = md.get("result_profitability_pct")
-    cur = f"\n\n📋 *Текущие данные:*\nПлан: {pp:,.0f} ₽ / {ppr:.1f}%\nФакт: {'—' if rp is None else f'{rp:,.0f} ₽'} / {'—' if rpr is None else f'{rpr:.1f}%'}"
+    cur = f"\n\n📋 *Текущие данные:*\nПлан: {pp:,.0f} ₽ / {ppr:.2f}%\nФакт: {'—' if rp is None else f'{rp:,.0f} ₽'} / {'—' if rpr is None else f'{rpr:.2f}%'}"
     await q.message.reply_text(
         f"✏️ *{MN[m]} {y}*{cur}\n\nЧто заполнить?",
         reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown"
@@ -889,7 +893,7 @@ async def retro_field(update, ctx):
         "plan_prof": "Введите *план рентабельности* (%):",
         "fact_pay": "Введите *факт оплат* (₽):",
         "fact_prof": "Введите *факт рентабельности* (%):",
-        "all": "Введите через запятую:\n*план оплат, факт оплат, план рент%, факт рент%*\nПример: 5000000, 4800000, 20, 18.5",
+        "all": "Введите через запятую:\n*план оплат, факт оплат, план рент%, факт рент%*\nПример: 5000000, 4800000, 20.5, 18.42",
     }
     await q.message.reply_text(prompts.get(f, "Введите значение:"), parse_mode="Markdown")
     return RETRO_VALUE
@@ -932,21 +936,20 @@ async def retro_val(update, ctx):
             )
             await update.message.reply_text(
                 f"{status_emoji} *Итог за {MN[m]} {y}*\n\n"
-                f"💰 Оплаты: {t['fp']:,.0f} / {t['pp']:,.0f} ₽ ({t['pctp']:.1f}%)\n"
-                f"📈 Рентабельность: {t['fpr']:.1f}% / {t['ppr']:.1f}%\n\n"
+                f"💰 Оплаты: {t['fp']:,.0f} / {t['pp']:,.0f} ₽ ({t['pctp']:.2f}%)\n"
+                f"📈 Рентабельность: {t['fpr']:.2f}% / {t['ppr']:.2f}%\n\n"
                 f"{status_text}",
                 parse_mode="Markdown"
             )
         else:
-            # Если меняли только план – просто показываем сохранённые цифры
             pp = md.get("plan_payments", 0)
             ppr = md.get("plan_profitability_pct", 0)
             rp = md.get("result_payments")
             rpr = md.get("result_profitability_pct")
             await update.message.reply_text(
                 f"✅ *{MN[m]} {y} — сохранено!*\n\n"
-                f"План: {pp:,.0f} ₽ / {ppr:.1f}%\n"
-                f"Факт: {'—' if rp is None else f'{rp:,.0f} ₽'} / {'—' if rpr is None else f'{rpr:.1f}%'}",
+                f"План: {pp:,.0f} ₽ / {ppr:.2f}%\n"
+                f"Факт: {'—' if rp is None else f'{rp:,.0f} ₽'} / {'—' if rpr is None else f'{rpr:.2f}%'}",
                 parse_mode="Markdown"
             )
         return ConversationHandler.END
@@ -1037,11 +1040,11 @@ async def summary_m(update, ctx):
         f"{si} *{MN[now.month]} {now.year} — {st}*\n"
         f"📅 День {now.day} (прошло {t['elapsed']} из {t['td']}, осталось {t['remaining']})\n\n"
         f"💰 *ОПЛАТЫ*\nПлан: {t['pp']:>12,.0f} ₽\nФакт: {t['fp']:>12,.0f} ₽\n"
-        f"[{bar}] {t['pctp']:.1f}%\n"
-        f"📈 *Темп выполнения:* {t['pct_today']:.1f}%\n"
+        f"[{bar}] {t['pctp']:.2f}%\n"
+        f"📈 *Темп выполнения:* {t['pct_today']:.2f}%\n"
         f"{lag_text}\n"
         f"⚡ Нужно/день: *{t['dn']:,.0f} ₽*\n\n"
-        f"📈 Рент: {t['fpr']:.1f}% / {t['ppr']:.1f}%",
+        f"📈 Рент: {t['fpr']:.2f}% / {t['ppr']:.2f}%",
         parse_mode="Markdown"
     )
 
@@ -1070,7 +1073,7 @@ async def hist_y_cb(update, ctx):
         if md["plan_payments"] > 0 or md["cumulative_entries"]:
             t = mtotals(md, y, mi)
             e = "✅" if t["pctp"] >= 100 else ("🟡" if t["pctp"] >= 70 else "🔴")
-            lines.append(f"{e} *{MN[mi]}*: {t['fp']:,.0f}/{t['pp']:,.0f} ({t['pctp']:.0f}%) рент {t['fpr']:.1f}%")
+            lines.append(f"{e} *{MN[mi]}*: {t['fp']:,.0f}/{t['pp']:,.0f} ({t['pctp']:.2f}%) рент {t['fpr']:.2f}%")
     await q.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 # ====== ПРЕМИЯ ======
@@ -1137,7 +1140,7 @@ async def prem_calc(update, ctx):
             parse_mode="Markdown"
         )
 
-# ====== РАСШ. ОТЧЁТ ======
+# ====== РАСШ. ОТЧЁТ (ИЗМЕНЁН) ======
 async def ext_s(update, ctx):
     if not await _adm(update):
         return ConversationHandler.END
@@ -1220,11 +1223,27 @@ async def e_nprof(update, ctx):
         return EXT_NPROF
 
 async def e_rprof(update, ctx):
+    required = ["enp", "erp", "enc", "ercr", "ercf", "enpr"]
+    missing = [k for k in required if k not in ctx.user_data]
+    if missing:
+        await update.message.reply_text(
+            f"❌ Не все данные заполнены. Отсутствуют: {', '.join(missing)}.\n"
+            "Пожалуйста, начните расширенный отчёт заново (/ext_report).",
+            parse_mode="Markdown"
+        )
+        return ConversationHandler.END
+
     try:
         v = _extract_number(update.message.text)
+    except:
+        await update.message.reply_text("❌ Введите рентабельность числом (например, 18.5)")
+        return EXT_RPROF
+
+    try:
         y = ctx.user_data["ext_year"]
         m = ctx.user_data["ext_month"]
-        np_, rp_ = ctx.user_data["enp"], ctx.user_data["erp"]
+        np_ = ctx.user_data["enp"]
+        rp_ = ctx.user_data["erp"]
         tp_ = np_ + rp_
         nac = np_ / ctx.user_data["enc"] if ctx.user_data["enc"] else 0
         rac = rp_ / ctx.user_data["ercr"] if ctx.user_data["ercr"] else 0
@@ -1238,10 +1257,17 @@ async def e_rprof(update, ctx):
             "total_profitability_pct": tpr
         }
         set_extended_report(y, m, data)
-        await update.message.reply_text(f"✅ *{MN[m]} {y}*\n💰 {tp_:,.0f} ₽\n📈 Рент: {tpr:.1f}%", parse_mode="Markdown")
+        await update.message.reply_text(
+            f"✅ *{MN[m]} {y}*\n💰 {tp_:,.0f} ₽\n"
+            f"📈 Рент. новых: {ctx.user_data['enpr']:.2f}%\n"
+            f"📈 Рент. пост.: {v:.2f}%\n"
+            f"📊 Общая рент.: {tpr:.2f}%",
+            parse_mode="Markdown"
+        )
         return ConversationHandler.END
-    except:
-        await update.message.reply_text("❌ Введите число")
+    except Exception as e:
+        logging.error(f"e_rprof error: {e}")
+        await update.message.reply_text(f"❌ Ошибка при сохранении: {e}")
         return EXT_RPROF
 
 # ====== УПРАВЛЕНИЕ ======
@@ -1378,7 +1404,7 @@ async def router(update, ctx):
                 f"📋 *{MN[rm]} {ry}*\n\n💰 Итого: {tp:,.0f} ₽\n"
                 f"👤 Новые: {r.get('new_payments',0):,.0f} ₽ ({r.get('new_count',0)} шт, ср.чек {nac:,.0f})\n"
                 f"🔄 Пост.: {r.get('repeat_payments',0):,.0f} ₽ ({r.get('repeat_count_report',0)} шт, ср.чек {rac:,.0f})\n"
-                f"📈 Рент: {tpr:.1f}%", parse_mode="Markdown"
+                f"📈 Рент: {tpr:.2f}%", parse_mode="Markdown"
             )
     else:
         await q.answer()
@@ -1627,7 +1653,7 @@ def main():
     asyncio.set_event_loop(loop)
     loop.run_until_complete(start_api_server())
 
-    print("🤖 Бот v4.1 (закрытие месяца + ретро-сводка) запущен!")
+    print("🤖 Бот v4.2 (сотые, дата факта, расширенный отчёт) запущен!")
     print(f"🌐 API сервер: http://localhost:{API_PORT}/api/data")
     print(f"📱 WebApp URL: {WEBAPP_URL}")
     print("📋 Команды зарегистрированы в меню Telegram.")
