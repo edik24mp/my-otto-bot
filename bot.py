@@ -179,15 +179,17 @@ def get_extended_report(year: int, month: int) -> dict | None:
     return res.data[0]["data"] if res.data else None
 
 def set_extended_report(year: int, month: int, data: dict):
-    # Пытаемся вставить запись, а при конфликте (дубликате) — обновить
-    result = supabase.table("extended_reports").upsert({
+    result = supabase.table("extended_reports").update({
         "year": year,
         "month": month,
         "data": data
-    }, on_conflict=["year", "month"]).execute()
-    # Проверим, что операция выполнена успешно
+    }).eq("year", year).eq("month", month).execute()
     if not result.data:
-        raise Exception("Не удалось сохранить расширенный отчёт")
+        supabase.table("extended_reports").insert({
+            "year": year,
+            "month": month,
+            "data": data
+        }).execute()
 
 def get_all_years() -> List[int]:
     res = supabase.table("year_plans").select("year").execute()
