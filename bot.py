@@ -394,7 +394,7 @@ async def e_tprof(update, ctx):
             f"📈 Рент. новых: {ctx.user_data['enpr']:.2f}%\n"
             f"📈 Рент. пост.: {ctx.user_data['erpr']:.2f}%\n"
             f"📊 Общая рент.: {tpr:.2f}%",
-            parse_mode="Markdown"
+            parse_mode="None"
         )
         return ConversationHandler.END
     except Exception as e:
