@@ -1039,7 +1039,7 @@ async def summary_m(update, ctx):
         f"📈 *Темп выполнения:* {t['pct_today']:.2f}%\n"
         f"{lag_text}\n"
         f"⚡ Нужно/день: *{t['dn']:,.0f} ₽*\n\n"
-        f"📈 Рент: {t['fpr']:.2f}% / {t['ppr']:.2f}%"
+        f"📈 Рент: {t['fpr']:.2f}% / {t['ppr']:.2f}%",
         parse_mode="Markdown"
     )
 
