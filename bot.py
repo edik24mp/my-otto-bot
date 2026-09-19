@@ -944,7 +944,7 @@ async def retro_val(update, ctx):
             await update.message.reply_text(
                 f"✅ *{MN[m]} {y} — сохранено!*\n\n"
                 f"План: {pp:,.0f} ₽ / {ppr:.2f}%\n"
-                f"Факт: {'—' if rp is None else f'{rp:,.0f} ₽'} / {'—' if rpr is None else f'{rpr:.2f}%'}"
+                f"Факт: {'—' if rp is None else f'{rp:,.0f} ₽'} / {'—' if rpr is None else f'{rpr:.2f}%'}",
                 parse_mode="Markdown"
             )
         return ConversationHandler.END
