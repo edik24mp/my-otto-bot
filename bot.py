@@ -811,6 +811,7 @@ async def fact_prof(update, ctx):
             f"✅ *Сохранено!*\n\n💰 {t['fp']:,.0f}/{t['pp']:,.0f} ₽ ({t['pctp']:.2f}%)\n"
             f"{li} {lw}: {abs(t['lag']):,.0f} ₽\n⚡ Нужно/день: {t['dn']:,.0f} ₽\n"
             f"📈 Рент: {t['fpr']:.2f}%/{t['ppr']:.2f}%\n📅 Ост: {t['remaining']} дн."
+            parse_mode="Markdown"
         )
         await update.message.reply_text(base_msg)
 
@@ -945,6 +946,7 @@ async def retro_val(update, ctx):
                 f"✅ *{MN[m]} {y} — сохранено!*\n\n"
                 f"План: {pp:,.0f} ₽ / {ppr:.2f}%\n"
                 f"Факт: {'—' if rp is None else f'{rp:,.0f} ₽'} / {'—' if rpr is None else f'{rpr:.2f}%'}"
+                parse_mode="Markdown"
             )
         return ConversationHandler.END
     except Exception as e:
@@ -1039,6 +1041,7 @@ async def summary_m(update, ctx):
         f"{lag_text}\n"
         f"⚡ Нужно/день: *{t['dn']:,.0f} ₽*\n\n"
         f"📈 Рент: {t['fpr']:.2f}% / {t['ppr']:.2f}%"
+        parse_mode="Markdown"
     )
 
 # ====== ИСТОРИЯ ======
@@ -1276,6 +1279,7 @@ async def e_tprof(update, ctx):
             f"📈 Рент. новых: {ctx.user_data['enpr']:.2f}%\n"
             f"📈 Рент. пост.: {ctx.user_data['erpr']:.2f}%\n"
             f"📊 Общая рент.: {tpr:.2f}%"
+            parse_mode="Markdown"
         )
         return ConversationHandler.END
     except Exception as e:
