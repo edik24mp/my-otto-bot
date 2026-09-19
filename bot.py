@@ -807,13 +807,12 @@ async def fact_prof(update, ctx):
         li = "❗" if t["behind"] else "🚀"
         lw = "Отставание" if t["behind"] else "Опережение"
 
-        base_msg = (
+               base_msg = (
             f"✅ *Сохранено!*\n\n💰 {t['fp']:,.0f}/{t['pp']:,.0f} ₽ ({t['pctp']:.2f}%)\n"
             f"{li} {lw}: {abs(t['lag']):,.0f} ₽\n⚡ Нужно/день: {t['dn']:,.0f} ₽\n"
             f"📈 Рент: {t['fpr']:.2f}%/{t['ppr']:.2f}%\n📅 Ост: {t['remaining']} дн."
-            parse_mode="Markdown"
         )
-        await update.message.reply_text(base_msg)
+        await update.message.reply_text(base_msg, parse_mode="Markdown")
 
         y, m = ctx.user_data["fy"], ctx.user_data["fm"]
         if int(ctx.user_data["fd"].split("-")[2]) == days_in(y, m):
