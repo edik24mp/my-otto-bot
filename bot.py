@@ -1277,7 +1277,7 @@ async def e_tprof(update, ctx):
             f"✅ *{MN[m]} {y}*\n💰 {tp_:,.0f} ₽\n"
             f"📈 Рент. новых: {ctx.user_data['enpr']:.2f}%\n"
             f"📈 Рент. пост.: {ctx.user_data['erpr']:.2f}%\n"
-            f"📊 Общая рент.: {tpr:.2f}%"
+            f"📊 Общая рент.: {tpr:.2f}%",
             parse_mode="Markdown"
         )
         return ConversationHandler.END
